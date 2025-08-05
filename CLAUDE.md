@@ -316,23 +316,6 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 
 ## 詳細実装計画
 
-### 現在の状況
-- ✅ 基本的なプロジェクト構造の理解完了
-- ✅ 論文解読と参考文献の整理完了
-- ✅ アーキテクチャ設計の概要決定
-- ✅ **requirements.txt作成・依存関係管理完了**
-  - torch, torchaudio, numpy, scipy, librosa
-  - aiohttp, aiofiles, tqdm（データセットダウンロード用）
-  - 全依存関係のインストール・動作確認済み
-- ✅ **MIR-1Kデータセットダウンロード・セットアップ完了**
-  - 1,000クリップ + アノテーション完全取得
-  - 評価用250クリップサブセット準備完了
-  - データ構造解析・検証済み
-- ✅ **LibriTTS-Rダウンロードスクリプト作成・動作確認完了**
-  - 16並列ダウンロード対応、複数ミラーサーバー活用
-  - dev_cleanサブセット（5,736ファイル）ダウンロード動作確認済み
-  - レジューム機能、自動展開・検証機能付き
-  - デフォルトで学習用全セット（約84GB）をダウンロード
 - ⬜ 実装Phase 1開始（基本構造構築）
 
 ### Phase 1: 基本構造構築（推定期間: 3-5日）
@@ -565,7 +548,6 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 
 #### Phase 1 検証
 - [ ] CQT 出力形状確認（T×176）
-- [x] **MIR-1Kデータローダーの基本仕様確認**（ファイル形式、アノテーション構造）
 - [ ] データローダーの実装・動作確認
 - [ ] 設定管理の完全性確認
 
@@ -594,9 +576,125 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 
 ## 注意事項
 
+- **コード内コメントは全て日本語で記述すること**
 - 全ての曖昧な実装部分には `# FIXME:` コメントを必ず追加
 - DSP モジュールは numpy/scipy ベース、学習部分は PyTorch
 - 実験の再現性確保のため random seed 固定
 - メモリ効率を考慮した動的バッチング実装
 - GPU/CPU 両対応の実装
 - 論文の式番号と実装の対応を明記（コメント内）
+
+
+## 主なコンポーネント
+
+### 設定管理 (`src/hiho_pytorch_base/config.py`)
+```python
+DataFileConfig:     # ファイルパス設定
+DatasetConfig:      # データセット分割設定
+NetworkConfig:      # ネットワーク構造設定
+ModelConfig:        # モデル設定
+TrainConfig:        # 学習パラメータ設定
+ProjectConfig:      # プロジェクト情報設定
+```
+
+### 学習システム (`scripts/train.py`)
+- PyTorch独自実装の学習ループ
+- TensorBoard/W&B統合
+- torch.amp（Automatic Mixed Precision）対応
+- エポックベーススケジューラー対応
+- スナップショット保存・復旧機能
+
+### データ処理 (`src/hiho_pytorch_base/dataset.py`)
+- 遅延読み込みによるメモリ効率化
+- dataclassベースの型安全なデータ構造
+- train/test/eval/valid の4種類データセット対応
+- pathlistファイル方式によるファイル管理
+- stemベース対応付けで異なるデータタイプを自動関連付け
+- 多話者学習対応（JSON形式の話者マッピング）
+
+### ネットワーク (`src/hiho_pytorch_base/network/predictor.py`)
+- マルチタスク予測器
+- 固定長・可変長データの統一処理
+- マルチヘッド出力対応
+
+### 推論・生成
+- `src/hiho_pytorch_base/generator.py`: 推論ジェネレーター
+- `scripts/generate.py`: 推論実行スクリプト
+
+### テストシステム
+- 自動テストデータ生成
+- エンドツーエンドテスト
+- 統合テスト
+
+## 使用方法
+
+### 学習実行
+```bash
+uv run -m scripts.train <config_yaml_path> <output_dir>
+```
+
+### 推論実行
+```bash
+uv run -m scripts.generate --model_dir <model_dir> --output_dir <output_dir> [--use_gpu]
+```
+
+### データセットチェック
+```bash
+uv run -m scripts.check_dataset <config_yaml_path> [--trials 10]
+```
+
+### テスト実行
+```bash
+uv run pytest tests/ -sv
+```
+
+### 開発環境セットアップ
+```bash
+uv sync
+```
+
+### 静的解析とフォーマット
+```bash
+uv run pyright && uv run ruff check --fix && uv run ruff format
+```
+
+## 技術仕様
+
+### 設定ファイル
+- **形式**: YAML
+- **管理**: Pydanticによる型安全な設定
+
+### 主な依存関係
+- **Python**: 3.12+
+- **PyTorch**: 2.7.1+
+- **NumPy**: 2.2.5+
+- **Pydantic**: 2.11.7+
+- **librosa**: 0.11.0+（音声処理）
+- その他詳細は`pyproject.toml`を参照
+
+### パッケージ管理
+- **uv**による高速パッケージ管理
+- **pyproject.toml**ベースの依存関係管理
+
+## Docker設計思想
+
+このプロジェクトのDockerfileは、実行環境の提供に特化した設計を採用しています：
+
+- **環境のみ提供**: Dockerfileは依存関係とライブラリのインストールのみを行い、学習コードや推論コードは含みません
+- **Git Clone前提**: 実際の利用時は、コンテナ内でGit cloneを実行してコードを取得することを想定しています
+- **最新依存関係**: 参照プロジェクト（yukarin_sosoa、yukarin_sosfd、accent_estimator）に準拠し、最新のCUDA/PyTorchベースイメージを使用
+- **音声処理対応**: libsoundfile1-dev、libasound2-dev等の音声処理ライブラリの整備方法をコメント等で案内
+- **uv使用**: pyproject.tomlベースの依存関係管理にuvを使用し、高速なパッケージインストールを実現
+
+## フォーク時の拡張例
+
+このフレームワークを拡張する際の参考：
+
+1. **新しいネットワークアーキテクチャ**: `network/`ディレクトリに追加
+2. **カスタム損失関数**: `model.py`の拡張
+3. **異なるデータ形式**: データローダーの拡張
+
+---
+
+@docs/設計.md
+@docs/コーディング規約.md
