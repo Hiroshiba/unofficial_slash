@@ -84,34 +84,40 @@ class Model(nn.Module):
 
     def forward(self, batch: BatchOutput) -> ModelOutput:
         """データをネットワークに入力して損失などを計算する"""
-        # Predictorから F0確率分布、F0値、Band Aperiodicity を取得
-        # FIXME: Phase 3で f0_probs を使用したF0確率分布ベース損失を実装予定（現在未使用）
-        f0_probs, f0_values, bap = self.predictor(
-            audio=batch.audio,  # (B, T) 音声波形
-            pitch_label=batch.pitch_label,  # (B, T)
-        )
+        device = batch.audio.device
+        target_f0 = batch.pitch_label  # (B, T)
 
-        # Pitch Consistency Loss (L_cons) - SLASH論文 Equation (1)
-        loss_cons = torch.tensor(0.0, device=f0_values.device)
-
-        if batch.audio_shifted is not None:
-            # シフト済み音声から F0 を予測
-            # FIXME: Phase 3で f0_probs_shifted を使用したF0確率分布ベース損失を実装予定（現在未使用）
-            f0_probs_shifted, f0_values_shifted, _ = self.predictor(
-                audio=batch.audio_shifted,
-                pitch_label=None,
+        # ピッチシフトがある場合（学習時）とない場合（評価時）で分岐
+        # FIXME: 学習時でもshift=0の場合があり、その場合は評価処理になってしまう
+        # 一貫性のため、学習時は常にforward_with_shift()を使用する方が良いかもしれない
+        # NOTE: そもそもmodel.pyは評価時に来ないはず、train.pyを参照
+        if torch.any(batch.pitch_shift_semitones != 0):
+            # 学習時: ピッチシフトありの場合
+            # forward_with_shift()を使用して一括処理
+            (
+                f0_probs,  # (B, T, ?)
+                f0_values,  # (B, T)
+                bap,  # (B, T, ?)
+                f0_probs_shifted,  # (B, T, ?)
+                f0_values_shifted,  # (B, T)
+                bap_shifted,  # (B, T, ?)
+            ) = self.predictor.forward_with_shift(
+                batch.audio, batch.pitch_shift_semitones
             )
 
-            # Pitch Consistency Lossを計算
+            # Pitch Consistency Loss (L_cons) - SLASH論文 Equation (1)
             loss_cons = pitch_consistency_loss(
                 f0_original=f0_values,
                 f0_shifted=f0_values_shifted,
                 shift_semitones=batch.pitch_shift_semitones,
             )
+        else:
+            # 評価時: ピッチシフトなし
+            f0_probs, f0_values, bap = self.predictor(batch.audio)
+            loss_cons = torch.tensor(0.0, device=device)
 
         # BAP損失（暫定MSE、Phase 3でより詳細な実装予定）
         # 無声音部分のaperiodicityは高く、有声音部分は低くなるべき
-        target_f0 = batch.pitch_label  # (B, T)
         voiced_mask = target_f0 > 0  # 有声音マスク
 
         # 暫定的なBAP損失（voiced部分は低く、unvoiced部分は高く）
@@ -124,8 +130,7 @@ class Model(nn.Module):
 
         # SLASH損失の重み付き合成（論文の重みを使用）
         total_loss = (
-            self.model_config.w_cons * loss_cons
-            + self.model_config.w_bap * loss_bap  # 設定からBAP重みを取得
+            self.model_config.w_cons * loss_cons + self.model_config.w_bap * loss_bap
         )
 
         # 評価指標計算

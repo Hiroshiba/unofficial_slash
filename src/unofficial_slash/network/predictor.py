@@ -39,18 +39,48 @@ def f0_probs_to_f0(f0_probs: Tensor, frequency_scale: Tensor) -> Tensor:
     return f0_values
 
 
+def shift_cqt_frequency(
+    cqt: Tensor,  # (B, ?, T)
+    shift_semitones: Tensor,  # (B,)
+    bins_per_octave: int = 24
+) -> Tensor:  # (B, ?, T)
+    """CQT空間での周波数軸シフト（論文準拠のピッチシフト実装）"""
+    batch_size, freq_bins, time_bins = cqt.shape
+    device = cqt.device
+    
+    # semitones -> bins変換
+    shift_bins = (shift_semitones * bins_per_octave / 12.0).round().long()  # (B,)
+    
+    cqt_shifted = torch.zeros_like(cqt)
+    
+    for b in range(batch_size):
+        shift = shift_bins[b].item()
+        if shift == 0:
+            cqt_shifted[b] = cqt[b]
+        elif shift > 0:
+            # 正のシフト: 高周波数にシフト
+            if shift < freq_bins:
+                cqt_shifted[b, shift:] = cqt[b, :-shift]
+        else:
+            # 負のシフト: 低周波数にシフト
+            shift = abs(shift)
+            if shift < freq_bins:
+                cqt_shifted[b, :-shift] = cqt[b, shift:]
+    
+    return cqt_shifted
+
+
 class Predictor(nn.Module):
     """メインのネットワーク"""
 
     def __init__(
         self,
-        cqt_config: dict,  # CQT設定
+        network_config: NetworkConfig,
         hidden_size: int,
         target_vector_size: int,
         speaker_size: int,
         speaker_embedding_size: int,
         encoder: Encoder,
-        f0_bins: int = 1024,
         sample_rate: int = 24000,
     ):
         super().__init__()
@@ -58,17 +88,18 @@ class Predictor(nn.Module):
         # GPU対応CQT変換器（nnAudio）
         self.cqt_transform = CQT(
             sr=sample_rate,
-            hop_length=cqt_config["hop_length"],
-            fmin=cqt_config["fmin"],
-            n_bins=cqt_config["total_bins"],
-            bins_per_octave=cqt_config["bins_per_octave"],
-            filter_scale=cqt_config["filter_scale"],
+            hop_length=network_config.cqt_hop_length,
+            fmin=network_config.cqt_fmin,
+            n_bins=network_config.cqt_total_bins,
+            bins_per_octave=network_config.cqt_bins_per_octave,
+            filter_scale=network_config.cqt_filter_scale,
             trainable=True,  # 学習可能なCQTカーネル
         )
 
         # CQTから中央部分を抽出するための設定
-        self.cqt_total_bins = cqt_config["total_bins"]  # 205
-        self.cqt_target_bins = cqt_config["bins"]  # 176
+        self.cqt_total_bins = network_config.cqt_total_bins  # 205
+        self.cqt_target_bins = network_config.cqt_bins  # 176
+        self.bins_per_octave = network_config.cqt_bins_per_octave  # 24（シフト計算用）
 
         self.speaker_embedder = nn.Embedding(speaker_size, speaker_embedding_size)
 
@@ -76,75 +107,102 @@ class Predictor(nn.Module):
         self.pre_conformer = nn.Linear(input_size, hidden_size)
         self.encoder = encoder
 
-        self.variable_head = nn.Linear(hidden_size, f0_bins)  # F0確率分布用
-        self.bap_head = nn.Linear(hidden_size, 8)  # Band Aperiodicity用
+        self.variable_head = nn.Linear(hidden_size, network_config.f0_bins)  # F0確率分布用
+        self.bap_head = nn.Linear(hidden_size, network_config.bap_bins)  # Band Aperiodicity用
 
         # 対数周波数スケールを登録（SLASH論文仕様: 20Hz-2kHz）
-        frequency_scale = create_log_frequency_scale(f0_bins)
+        frequency_scale = create_log_frequency_scale(network_config.f0_bins)
         self.register_buffer("frequency_scale", frequency_scale)
 
-    def forward(  # noqa: D102
+    def forward(
         self,
-        *,
-        audio: Tensor,  # (B, T) 音声波形
-        pitch_label: Tensor | None = None,  # (B, T) ピッチラベル（学習時のみ）
-    ) -> tuple[
-        Tensor, Tensor, Tensor
-    ]:  # F0確率分布 (B, T, 1024), F0値 (B, T), Band Aperiodicity (B, T, 8)
-        device = audio.device
-        batch_size = audio.shape[0]
-
-        # GPU対応CQT変換（nnAudio）
-        # audio: (B, T) -> cqt_full: (B, F, T)
+        audio: Tensor,  # (B, T)
+    ) -> tuple[Tensor, Tensor, Tensor]:  # (B, T, ?), (B, T), (B, T, ?)
+        """通常の推論用: audio -> CQT -> encode"""
+        # GPU対応CQT変換
         cqt_full = self.cqt_transform(audio)  # (B, cqt_total_bins, T)
-
-        # 中央176 binsを抽出（論文: "processes the central 176 bins"）
+        
+        # 中央176 binsを抽出
         start_bin = (self.cqt_total_bins - self.cqt_target_bins) // 2
         end_bin = start_bin + self.cqt_target_bins
         cqt_central = cqt_full[:, start_bin:end_bin, :]  # (B, 176, T)
+        
+        return self.encode_cqt(cqt_central)
 
-        # Conformer用に転置: (B, 176, T) -> (B, T, 176)
-        cqt = cqt_central.transpose(1, 2)  # (B, T, 176)
-        seq_length = cqt.shape[1]
+    def forward_with_shift(
+        self,
+        audio: Tensor,  # (B, T)
+        shift_semitones: Tensor,  # (B,)
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:  # (B, T, ?), (B, T), (B, T, ?), (B, T, ?), (B, T), (B, T, ?)
+        """学習用: audio -> CQT -> shift -> encode both"""
+        # GPU対応CQT変換
+        cqt_full = self.cqt_transform(audio)  # (B, cqt_total_bins, T)
+        
+        # 中央176 binsを抽出
+        start_bin = (self.cqt_total_bins - self.cqt_target_bins) // 2
+        end_bin = start_bin + self.cqt_target_bins
+        cqt_central = cqt_full[:, start_bin:end_bin, :]  # (B, 176, T)
+        
+        # CQT空間でピッチシフト（論文準拠）
+        cqt_shifted = shift_cqt_frequency(
+            cqt_central, shift_semitones, self.bins_per_octave
+        )  # (B, 176, T)
+        
+        # 両方を推定
+        f0_probs_orig, f0_values_orig, bap_orig = self.encode_cqt(cqt_central)
+        f0_probs_shift, f0_values_shift, bap_shift = self.encode_cqt(cqt_shifted)
+        
+        return (
+            f0_probs_orig, f0_values_orig, bap_orig,
+            f0_probs_shift, f0_values_shift, bap_shift,
+        )
+
+    def encode_cqt(
+        self,
+        cqt: Tensor,  # (B, ?, T)
+    ) -> tuple[Tensor, Tensor, Tensor]:  # (B, T, ?), (B, T), (B, T, ?)
+        """CQT -> F0推定の共通処理"""
+        device = cqt.device
+        batch_size = cqt.shape[0]
+        
+        # Conformer用に転置: (B, F, T) -> (B, T, F)
+        cqt_transposed = cqt.transpose(1, 2)  # (B, T, 176)
+        seq_length = cqt_transposed.shape[1]
 
         # ダミーの話者埋め込み（SLASHでは使用しないが、既存構造維持のため）
         dummy_speaker_id = torch.zeros(batch_size, dtype=torch.long, device=device)
-        speaker_embedding = self.speaker_embedder(
-            dummy_speaker_id
-        )  # (B, speaker_embedding_size)
+        speaker_embedding = self.speaker_embedder(dummy_speaker_id)
 
         # 話者埋め込みを時系列に拡張
         speaker_expanded = speaker_embedding.unsqueeze(1).expand(
             batch_size, seq_length, -1
-        )  # (B, T, speaker_embedding_size)
+        )
 
         # CQTと話者埋め込みを結合
-        combined_input = torch.cat(
-            [cqt, speaker_expanded], dim=2
-        )  # (B, T, cqt_dim + speaker_embedding_size)
+        combined_input = torch.cat([cqt_transposed, speaker_expanded], dim=2)
 
         # Conformer前処理
-        h = self.pre_conformer(combined_input)  # (B, T, hidden_size)
+        h = self.pre_conformer(combined_input)
 
         # 全フレームが有効と仮定（固定長パディング済み）
         lengths = torch.full((batch_size,), seq_length, device=device)
-        mask = make_non_pad_mask(lengths).unsqueeze(-2).to(device)  # (B, 1, T)
+        mask = make_non_pad_mask(lengths).unsqueeze(-2).to(device)
 
         # Conformer エンコーダ
-        encoded, _ = self.encoder(x=h, cond=None, mask=mask)  # (B, T, hidden_size)
+        encoded, _ = self.encoder(x=h, cond=None, mask=mask)
 
         # F0確率分布とBand Aperiodicityを出力
-        f0_probs = self.variable_head(encoded)  # (B, T, f0_bins) → F0確率分布
-        bap = self.bap_head(encoded)  # (B, T, 8) → Band Aperiodicity
+        f0_probs = self.variable_head(encoded)
+        bap = self.bap_head(encoded)
 
-        # F0確率分布から実際のF0値を計算（SLASH論文: weighted average）
-        f0_values = f0_probs_to_f0(f0_probs, self.frequency_scale)  # (B, T)
+        # F0確率分布から実際のF0値を計算
+        f0_values = f0_probs_to_f0(f0_probs, self.frequency_scale)
 
         return f0_probs, f0_values, bap
 
 
 def create_predictor(
-    network_config: NetworkConfig, cqt_config: dict, sample_rate: int = 24000
+    network_config: NetworkConfig, sample_rate: int = 24000
 ) -> Predictor:
     """設定からPredictorを作成（SLASH用Pitch Encoderに最適化）"""
     # SLASH用に最適化されたConformerパラメータ
@@ -173,12 +231,11 @@ def create_predictor(
     speaker_embedding_size = 16  # 32 -> 16で計算量削減
 
     return Predictor(
-        cqt_config=cqt_config,
+        network_config=network_config,
         hidden_size=network_config.hidden_size,
         target_vector_size=network_config.f0_bins,  # F0確率分布: 1024 bins
         speaker_size=1,  # ダミー話者（SLASH未使用）
         speaker_embedding_size=speaker_embedding_size,
         encoder=encoder,
-        f0_bins=network_config.f0_bins,  # F0確率分布のビン数
         sample_rate=sample_rate,
     )

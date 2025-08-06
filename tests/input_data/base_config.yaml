@@ -14,14 +14,6 @@ dataset:
   frame_rate: 200.0
   frame_length: 480
 
-  # CQT 設定
-  cqt_bins: 176
-  cqt_total_bins: 205
-  cqt_hop_length: 120
-  cqt_bins_per_octave: 24
-  cqt_fmin: 32.70
-  cqt_filter_scale: 0.5
-
   # ピッチシフト設定
   pitch_shift_range: 14
 
@@ -31,6 +23,14 @@ network:
   bap_bins: 8
   hidden_size: 512
   encoder_layers: 6
+
+  # CQT 設定
+  cqt_bins: 176
+  cqt_total_bins: 205
+  cqt_hop_length: 120
+  cqt_bins_per_octave: 24
+  cqt_fmin: 32.70
+  cqt_filter_scale: 0.5
 
 model:
   # 損失重み

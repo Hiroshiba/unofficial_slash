@@ -268,11 +268,12 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 
 ## 実装優先順位 (**現在**: 汎用MLフレームワーク → SLASH専用に破壊的変更)
 
-### 🎯 **現在の状況** (2025-08-06 更新):
+### 🎯 **現在の状況** (2025-01-14 更新):
 - ✅ **基本構造完了**: src/, scripts/, tests/, pathlistシステム、Pydantic設定
 - ✅ **学習システム完了**: train.py, model.py, predictor.py (Conformer)
 - ✅ **データ処理部分完了**: dataset.py, CQT変換, MIR-1K対応
-- ✅ **🆕 Phase 1 完了**: SLASH用基本構造変更、固定長実装
+- ✅ **Phase 1 完了**: SLASH用基本構造変更、固定長実装
+- ✅ **🆕 Phase 2 完了**: 論文準拠の音声処理順序、CQT空間ピッチシフト実装
 
 ### 🔄 **SLASH実装フェーズ** (破壊的変更による段階的移行):
 
@@ -282,12 +283,17 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 3. **Predictor/Model変更**: SLASH用入出力・損失関数に変更
 4. **動作確認**: 基本コンポーネントのコンパイル・作成確認完了
 
-**Phase 2: Pitch Encoder実装** 🔄 **部分実装済み (2025-08-06)**
-1. **CQT変換**: STFTベース疑似CQT実装（176 bins抽出）✅
-2. **ピッチシフト**: CQT空間での±14 binsランダムシフト実装 ✅
-3. **F0確率分布**: 対数周波数スケール（20Hz-2kHz）+ 重み付き平均 ✅
-4. **損失変更**: L_cons (Pitch Consistency Loss, Huber norm) 実装 ✅
-5. **アーキテクチャ**: ConformerをSLASH用に最適化 ✅
+**Phase 2: 音声処理順序修正・Pitch Encoder実装** ✅ **完了 (2025-01-14)**
+1. **🆕 論文準拠処理順序**: 音声→CQT→CQT空間シフト（論文準拠）✅
+2. **🆕 データ構造簡素化**: audio_shifted削除、GPU効率向上 ✅
+3. **🆕 Predictor設計改善**: forward_with_shift()とencode_cqt()実装 ✅
+4. **🆕 CQT空間シフト**: shift_cqt_frequency()関数、±14 binsシフト ✅
+5. **🆕 設定統合**: CQT設定をNetworkConfigに移動、dict→Pydantic統合 ✅
+
+**主要成果**:
+- 論文準拠の処理フロー実現
+- GPU最適化（CQT変換1回のみ）
+- コード品質向上（設計.md準拠、重複削除）
 
 **Phase 3: DSPモジュール統合** (4-6日)
 1. **dsp/モジュール**: Pitch Guide Generator (SHS) 実装
@@ -395,28 +401,26 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 - GED損失の安定化手法
 - Dynamic batching の具体的制御方法
 
-### 🚀 **現在の実装状況** (2025-08-06 更新)
+### 🚀 **現在の実装状況** (2025-01-14 更新)
 
 **Phase 1 進捗**: ✅ **完了** - SLASH基本構造変更・固定長実装  
-**Phase 2 進捗**: ✅ **完了 (2025-08-06)** - 設計修正・アーキテクチャ再構築完了
+**Phase 2 進捗**: ✅ **完了 (2025-01-14)** - 論文準拠音声処理・設定統合完了
 
-**Phase 2 成果（設計修正版）**:
-- ✅ 設計準拠のアーキテクチャ実現：Predictor内CQT処理、音声入力ベース
-- ✅ GPU対応CQT実装（nnAudio使用、学習可能カーネル）
-- ✅ 設定依存関係正常化（DatasetConfigにCQT・ピッチシフト設定統合）
-- ✅ データ処理責務最適化（LazyInputData：音声読み込みのみ）
-- ✅ ピッチシフト処理（音声時間伸縮ベース、一貫処理）
-- ✅ F0確率分布・Pitch Consistency Loss実装維持
-- ✅ Phase 3準備（F0確率分布をPhase 3のL_guide用に保持）
+**🎉 Phase 2 最終成果**:
+- ✅ **論文準拠実装**: 音声→CQT→CQT空間シフト（SLASH/SPICE論文準拠）
+- ✅ **GPU効率最適化**: CQT変換1回のみ、audio_shifted削除
+- ✅ **設定管理統合**: CQT設定をNetworkConfigに統合、Pydantic化
+- ✅ **インターフェース改善**: forward_with_shift()とencode_cqt()実装
+- ✅ **コード品質向上**: 設計.md準拠、重複処理削除、FIXMEコメント追加
 
-**Phase 2で解決した課題**:
-- 設定値ハードコーディング問題解決
-- CQT処理のGPU対応・高速化実現
-- バッチ処理の簡素化（一貫したピッチシフト処理）
+**解決した主要課題**:
+- 音声処理順序の論文非準拠問題
+- データ構造の複雑性問題  
+- 設定値ハードコーディング問題
+- GPU処理の非効率性
 
-**📝 Phase 3実装メモ**:
-- **ピッチシフト方法**: 現在は音声時間伸縮ベース。論文では「CQTの周波数軸シフト」と記載。Phase 3以降で論文準拠への変更を検討
-- F0確率分布はL_guide損失（Equation 3）で必要なため保持
+**残存課題（Phase 3対応予定）**:
+- 学習時ピッチシフト=0の処理不整合
 
 **次のステップ**: Phase 3 - DSP統合・絶対ピッチ学習（SHS、L_guide、L_pseudo）
 

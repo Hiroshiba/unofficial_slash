@@ -28,14 +28,6 @@ class DatasetConfig(BaseModel):
     frame_rate: float
     frame_length: int
 
-    # CQT 設定
-    cqt_bins: int
-    cqt_total_bins: int
-    cqt_hop_length: int
-    cqt_bins_per_octave: int
-    cqt_fmin: float
-    cqt_filter_scale: float
-
     # ピッチシフト設定
     pitch_shift_range: int
 
@@ -48,6 +40,14 @@ class NetworkConfig(BaseModel):
     bap_bins: int
     hidden_size: int
     encoder_layers: int
+
+    # CQT 設定
+    cqt_bins: int
+    cqt_total_bins: int
+    cqt_hop_length: int
+    cqt_bins_per_octave: int
+    cqt_fmin: float
+    cqt_filter_scale: float
 
 
 class ModelConfig(BaseModel):
