@@ -49,6 +49,13 @@ class NetworkConfig(BaseModel):
     cqt_fmin: float
     cqt_filter_scale: float
 
+    # Pitch Guide Generator 設定
+    pitch_guide_window_size: int
+    pitch_guide_shs_n_max: int
+    pitch_guide_f_min: float
+    pitch_guide_f_max: float
+    pitch_guide_n_fft: int
+
 
 class ModelConfig(BaseModel):
     """SLASH 損失関数の設定"""

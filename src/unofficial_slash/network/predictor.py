@@ -9,12 +9,11 @@ from torch.nn import functional as F
 
 from unofficial_slash.config import NetworkConfig
 from unofficial_slash.network.conformer.encoder import Encoder
+from unofficial_slash.network.dsp.pitch_guide import PitchGuideGenerator
 from unofficial_slash.network.transformer.utility import make_non_pad_mask
 
 
-def create_log_frequency_scale(
-    f0_bins: int, fmin: float = 20.0, fmax: float = 2000.0
-) -> Tensor:
+def create_log_frequency_scale(f0_bins: int, fmin: float, fmax: float) -> Tensor:
     """対数周波数スケールを作成（SLASH論文仕様: 20Hz-2kHz）"""
     log_fmin = math.log(fmin)
     log_fmax = math.log(fmax)
@@ -42,17 +41,17 @@ def f0_probs_to_f0(f0_probs: Tensor, frequency_scale: Tensor) -> Tensor:
 def shift_cqt_frequency(
     cqt: Tensor,  # (B, ?, T)
     shift_semitones: Tensor,  # (B,)
-    bins_per_octave: int = 24
+    bins_per_octave: int,
 ) -> Tensor:  # (B, ?, T)
     """CQT空間での周波数軸シフト（論文準拠のピッチシフト実装）"""
     batch_size, freq_bins, time_bins = cqt.shape
     device = cqt.device
-    
+
     # semitones -> bins変換
     shift_bins = (shift_semitones * bins_per_octave / 12.0).round().long()  # (B,)
-    
+
     cqt_shifted = torch.zeros_like(cqt)
-    
+
     for b in range(batch_size):
         shift = shift_bins[b].item()
         if shift == 0:
@@ -66,7 +65,7 @@ def shift_cqt_frequency(
             shift = abs(shift)
             if shift < freq_bins:
                 cqt_shifted[b, :-shift] = cqt[b, shift:]
-    
+
     return cqt_shifted
 
 
@@ -81,7 +80,7 @@ class Predictor(nn.Module):
         speaker_size: int,
         speaker_embedding_size: int,
         encoder: Encoder,
-        sample_rate: int = 24000,
+        sample_rate: int,
     ):
         super().__init__()
 
@@ -101,17 +100,37 @@ class Predictor(nn.Module):
         self.cqt_target_bins = network_config.cqt_bins  # 176
         self.bins_per_octave = network_config.cqt_bins_per_octave  # 24（シフト計算用）
 
+        # Pitch Guide Generator初期化
+        self.pitch_guide_generator = PitchGuideGenerator(
+            sample_rate=sample_rate,
+            hop_length=network_config.cqt_hop_length,
+            n_fft=network_config.pitch_guide_n_fft,
+            window_size=network_config.pitch_guide_window_size,
+            shs_n_max=network_config.pitch_guide_shs_n_max,
+            f_min=network_config.pitch_guide_f_min,
+            f_max=network_config.pitch_guide_f_max,
+            n_pitch_bins=network_config.f0_bins,
+        )
+
         self.speaker_embedder = nn.Embedding(speaker_size, speaker_embedding_size)
 
         input_size = self.cqt_target_bins + speaker_embedding_size
         self.pre_conformer = nn.Linear(input_size, hidden_size)
         self.encoder = encoder
 
-        self.variable_head = nn.Linear(hidden_size, network_config.f0_bins)  # F0確率分布用
-        self.bap_head = nn.Linear(hidden_size, network_config.bap_bins)  # Band Aperiodicity用
+        self.variable_head = nn.Linear(
+            hidden_size, network_config.f0_bins
+        )  # F0確率分布用
+        self.bap_head = nn.Linear(
+            hidden_size, network_config.bap_bins
+        )  # Band Aperiodicity用
 
         # 対数周波数スケールを登録（SLASH論文仕様: 20Hz-2kHz）
-        frequency_scale = create_log_frequency_scale(network_config.f0_bins)
+        frequency_scale = create_log_frequency_scale(
+            network_config.f0_bins,
+            network_config.pitch_guide_f_min,
+            network_config.pitch_guide_f_max,
+        )
         self.register_buffer("frequency_scale", frequency_scale)
 
     def forward(
@@ -121,40 +140,46 @@ class Predictor(nn.Module):
         """通常の推論用: audio -> CQT -> encode"""
         # GPU対応CQT変換
         cqt_full = self.cqt_transform(audio)  # (B, cqt_total_bins, T)
-        
+
         # 中央176 binsを抽出
         start_bin = (self.cqt_total_bins - self.cqt_target_bins) // 2
         end_bin = start_bin + self.cqt_target_bins
         cqt_central = cqt_full[:, start_bin:end_bin, :]  # (B, 176, T)
-        
+
         return self.encode_cqt(cqt_central)
 
     def forward_with_shift(
         self,
         audio: Tensor,  # (B, T)
         shift_semitones: Tensor,  # (B,)
-    ) -> tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:  # (B, T, ?), (B, T), (B, T, ?), (B, T, ?), (B, T), (B, T, ?)
+    ) -> tuple[
+        Tensor, Tensor, Tensor, Tensor, Tensor, Tensor
+    ]:  # (B, T, ?), (B, T), (B, T, ?), (B, T, ?), (B, T), (B, T, ?)
         """学習用: audio -> CQT -> shift -> encode both"""
         # GPU対応CQT変換
         cqt_full = self.cqt_transform(audio)  # (B, cqt_total_bins, T)
-        
+
         # 中央176 binsを抽出
         start_bin = (self.cqt_total_bins - self.cqt_target_bins) // 2
         end_bin = start_bin + self.cqt_target_bins
         cqt_central = cqt_full[:, start_bin:end_bin, :]  # (B, 176, T)
-        
+
         # CQT空間でピッチシフト（論文準拠）
         cqt_shifted = shift_cqt_frequency(
             cqt_central, shift_semitones, self.bins_per_octave
         )  # (B, 176, T)
-        
+
         # 両方を推定
         f0_probs_orig, f0_values_orig, bap_orig = self.encode_cqt(cqt_central)
         f0_probs_shift, f0_values_shift, bap_shift = self.encode_cqt(cqt_shifted)
-        
+
         return (
-            f0_probs_orig, f0_values_orig, bap_orig,
-            f0_probs_shift, f0_values_shift, bap_shift,
+            f0_probs_orig,
+            f0_values_orig,
+            bap_orig,
+            f0_probs_shift,
+            f0_values_shift,
+            bap_shift,
         )
 
     def encode_cqt(
@@ -164,7 +189,7 @@ class Predictor(nn.Module):
         """CQT -> F0推定の共通処理"""
         device = cqt.device
         batch_size = cqt.shape[0]
-        
+
         # Conformer用に転置: (B, F, T) -> (B, T, F)
         cqt_transposed = cqt.transpose(1, 2)  # (B, T, 176)
         seq_length = cqt_transposed.shape[1]
@@ -201,9 +226,7 @@ class Predictor(nn.Module):
         return f0_probs, f0_values, bap
 
 
-def create_predictor(
-    network_config: NetworkConfig, sample_rate: int = 24000
-) -> Predictor:
+def create_predictor(network_config: NetworkConfig, sample_rate: int) -> Predictor:
     """設定からPredictorを作成（SLASH用Pitch Encoderに最適化）"""
     # SLASH用に最適化されたConformerパラメータ
     dropout_rate = 0.1

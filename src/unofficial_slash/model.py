@@ -19,12 +19,12 @@ class ModelOutput(DataNumProtocol):
     loss: Tensor
     """逆伝播させる損失"""
 
-    # Phase 2: SLASH損失項目
+    # Phase 2-3: SLASH損失項目
     loss_cons: Tensor  # Pitch Consistency Loss (L_cons)
     loss_bap: Tensor  # Band Aperiodicity Loss (暫定MSE)
+    loss_guide: Tensor  # Pitch Guide Loss (L_guide)
 
-    # Phase 3以降で追加予定:
-    # loss_guide: Tensor  # Pitch Guide Loss (L_guide)
+    # Phase 4以降で追加予定:
     # loss_pseudo: Tensor # Pseudo Spectrogram Loss (L_pseudo)
     # loss_recon: Tensor  # Reconstruction Loss (L_recon, GED)
 
@@ -36,7 +36,7 @@ def pitch_consistency_loss(
     f0_original: Tensor,  # (B, T) 元のF0値
     f0_shifted: Tensor,  # (B, T) シフト後のF0値
     shift_semitones: Tensor,  # (B,) ピッチシフト量（semitones）
-    delta: float = 1.0,  # Huber損失のデルタ
+    delta: float,  # Huber損失のデルタ
 ) -> Tensor:
     """Pitch Consistency Loss (L_cons) - SLASH論文 Equation (1)"""
     # log2(p_t) - log2(p_shift_t) + d/12 を計算
@@ -55,6 +55,28 @@ def pitch_consistency_loss(
 
     # Huber損失を適用
     loss = huber_loss(target_diff, torch.zeros_like(target_diff), delta=delta)
+
+    return loss
+
+
+def pitch_guide_loss(
+    f0_probs: Tensor,  # (B, T, F) F0確率分布
+    pitch_guide: Tensor,  # (B, T, F) Pitch Guide
+    hinge_margin: float,  # ヒンジ損失のマージン
+) -> Tensor:
+    """
+    Pitch Guide Loss (L_guide) - SLASH論文 Equation (3)
+
+    L_g = (1/T) * Σ_t max(1 - Σ_f P_{t,f} * G_{t,f} - m, 0)
+    """
+    # P と G の内積を計算（各フレームごと）
+    inner_product = torch.sum(f0_probs * pitch_guide, dim=-1)  # (B, T)
+
+    # ヒンジ損失: max(1 - inner_product - margin, 0)
+    hinge_loss = torch.clamp(1.0 - inner_product - hinge_margin, min=0.0)
+
+    # 時間軸での平均
+    loss = torch.mean(hinge_loss)
 
     return loss
 
@@ -90,6 +112,8 @@ class Model(nn.Module):
         # ピッチシフトがある場合（学習時）とない場合（評価時）で分岐
         # FIXME: 学習時でもshift=0の場合があり、その場合は評価処理になってしまう
         # 一貫性のため、学習時は常にforward_with_shift()を使用する方が良いかもしれない
+        # FIXME: この分岐条件が脆弱で、バッチ内の一部でもshift≠0があると学習扱いになる
+        # より明示的なtraining/evaluation mode flag が必要
         # NOTE: そもそもmodel.pyは評価時に来ないはず、train.pyを参照
         if torch.any(batch.pitch_shift_semitones != 0):
             # 学習時: ピッチシフトありの場合
@@ -98,9 +122,9 @@ class Model(nn.Module):
                 f0_probs,  # (B, T, ?)
                 f0_values,  # (B, T)
                 bap,  # (B, T, ?)
-                f0_probs_shifted,  # (B, T, ?)
+                f0_probs_shifted,  # (B, T, ?) - FIXME: 未使用変数、将来のF0確率分布ベース損失用
                 f0_values_shifted,  # (B, T)
-                bap_shifted,  # (B, T, ?)
+                bap_shifted,  # (B, T, ?) - FIXME: 未使用変数、将来のBAP関連損失用
             ) = self.predictor.forward_with_shift(
                 batch.audio, batch.pitch_shift_semitones
             )
@@ -110,11 +134,21 @@ class Model(nn.Module):
                 f0_original=f0_values,
                 f0_shifted=f0_values_shifted,
                 shift_semitones=batch.pitch_shift_semitones,
+                delta=1.0,
             )
         else:
             # 評価時: ピッチシフトなし
             f0_probs, f0_values, bap = self.predictor(batch.audio)
             loss_cons = torch.tensor(0.0, device=device)
+
+        # Pitch Guide生成とPitch Guide Loss (L_guide) 計算
+        pitch_guide = self.predictor.pitch_guide_generator(batch.audio)  # (B, T, F)
+
+        loss_guide = pitch_guide_loss(
+            f0_probs=f0_probs,
+            pitch_guide=pitch_guide,
+            hinge_margin=self.model_config.hinge_margin,
+        )
 
         # BAP損失（暫定MSE、Phase 3でより詳細な実装予定）
         # 無声音部分のaperiodicityは高く、有声音部分は低くなるべき
@@ -130,7 +164,9 @@ class Model(nn.Module):
 
         # SLASH損失の重み付き合成（論文の重みを使用）
         total_loss = (
-            self.model_config.w_cons * loss_cons + self.model_config.w_bap * loss_bap
+            self.model_config.w_cons * loss_cons
+            + self.model_config.w_bap * loss_bap
+            + self.model_config.w_guide * loss_guide
         )
 
         # 評価指標計算
@@ -140,6 +176,7 @@ class Model(nn.Module):
             loss=total_loss,
             loss_cons=loss_cons,
             loss_bap=loss_bap,
+            loss_guide=loss_guide,
             f0_mae=f0_mae,
             data_num=batch.data_num,
         )

@@ -24,8 +24,6 @@ class OutputData:
     pitch_shift_semitones: float  # ピッチシフト量（semitones）
 
 
-
-
 def preprocess(
     d: InputData,
     *,
