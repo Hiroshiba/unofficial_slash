@@ -282,11 +282,12 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 3. **Predictor/Model変更**: SLASH用入出力・損失関数に変更
 4. **動作確認**: 基本コンポーネントのコンパイル・作成確認完了
 
-**Phase 2: Pitch Encoder実装** (3-5日) 
-1. **Predictor変更**: Conformer → NANSY++ベース Pitch Encoder に破壊的変更
-2. **CQT統合**: 現在の CQT 実装を Predictor に統合
-3. **損失変更**: model.py の汎用損失 → L_cons (Pitch Consistency Loss)
-4. **ピッチシフト**: CQT空間でのピッチシフト処理実装
+**Phase 2: Pitch Encoder実装** 🔄 **部分実装済み (2025-08-06)**
+1. **CQT変換**: STFTベース疑似CQT実装（176 bins抽出）✅
+2. **ピッチシフト**: CQT空間での±14 binsランダムシフト実装 ✅
+3. **F0確率分布**: 対数周波数スケール（20Hz-2kHz）+ 重み付き平均 ✅
+4. **損失変更**: L_cons (Pitch Consistency Loss, Huber norm) 実装 ✅
+5. **アーキテクチャ**: ConformerをSLASH用に最適化 ✅
 
 **Phase 3: DSPモジュール統合** (4-6日)
 1. **dsp/モジュール**: Pitch Guide Generator (SHS) 実装
@@ -343,27 +344,29 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 7. **🆕 基本コンポーネントコンパイル確認**: **完了**
    - Config, Predictor, Model の作成・動作確認済み
 
-**⚠️ Phase 1 の制限事項（Phase 2で解決予定）**:
-- **CQT変換**: 暫定実装（ダミーデータ）→ FIXME: 実際のCQT変換実装
-- **損失関数**: 暫定MSE損失 → FIXME: SLASH損失（L_cons, L_guide等）実装
-- **固定長前提**: パディング処理 → FIXME: Dynamic batching対応
-- **Conformerベース**: 暫定構造 → FIXME: NANSY++ベースPitch Encoder実装
+**⚠️ Phase 1 の制限事項（Phase 2で部分解決）**:
+- ✅ **CQT変換**: STFTベース疑似CQT実装（完了）
+- ✅ **損失関数**: L_cons (Pitch Consistency Loss) 実装（完了）
+- ✅ **Conformer最適化**: SLASH用に調整（完了）  
+- ⚠️ **固定長前提**: パディング処理 → FIXME: Dynamic batching対応（未解決）
 
 **🔄 Phase 1 残り作業**:
 - テストデータ準備（pathlist作成）
 - 実際の学習ループ動作確認
 
-#### Phase 2: Pitch Encoder実装 🚧 **要破壊的変更**
-**実装対象**: 現在のConformer Predictor → NANSY++ベース Pitch Encoder
-**実装手順**:
-1. **Predictor.forward()変更**: 汎用出力 → (F0確率分布, Band Aperiodicity)
-2. **CQT統合**: data.py の CQT → Predictor 内部に移動
-3. **損失変更**: model.py の cross_entropy → L_cons (Pitch Consistency)
-4. **ピッチシフト**: batch内でのCQTピッチシフト実装
+#### Phase 2: Pitch Encoder実装 🔄 **部分実装済み (2025-08-06)**
+**実装対象**: SLASH相対ピッチ学習システム
+**✅ 完了実装**:
+1. **CQT変換**: STFTベース疑似CQT (dataset.py) ✅
+2. **ピッチシフト**: CQT空間での±14 binsシフト (data.py) ✅
+3. **F0確率分布**: 重み付き平均でF0値計算 (predictor.py) ✅
+4. **L_cons損失**: Pitch Consistency Loss実装 (model.py) ✅
+5. **Conformer最適化**: SLASH用パラメータ調整 ✅
 
-**FIXME**:
-- NANSY++ の具体的なアーキテクチャ詳細
-- CQT の最適な埋め込み位置
+**⚠️ Phase 2残課題** (Phase 3で解決予定):
+- 設定値ハードコーディング → config統合
+- STFTベース疑似CQT → 真のCQT実装  
+- 未使用変数整理 → F0確率分布ベース損失
 
 #### Phase 3: DSP統合・絶対ピッチ学習 🔬 **新規実装**
 **実装対象**: dsp/モジュール群とSLASH特化損失関数
@@ -393,15 +396,70 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 - Dynamic batching の具体的制御方法
 
 ### 🚀 **現在の実装状況** (2025-08-06 更新)
-**Phase 1 進捗**: ✅ **完了** - SLASH基本構造変更・固定長実装
-- ✅ config.py変更 → ✅ base_config.yaml変更 → ✅ データ構造変更 → ✅ Predictor/Model変更 → ✅ コンパイル確認 → 🔄 テストデータ準備
 
-**Phase 1 成果**:
-- ✅ 全コンポーネントのSLASH対応完了（Config, Predictor, Model, Dataset）
-- ✅ 基本コンパイルエラー解消、オブジェクト作成確認済み
-- ⚠️ Phase 1制限事項: CQT暫定実装、MSE暫定損失、固定長前提
+**Phase 1 進捗**: ✅ **完了** - SLASH基本構造変更・固定長実装  
+**Phase 2 進捗**: 🔄 **部分実装済み** - SLASH相対ピッチ学習システム
 
-**次のステップ**: Phase 2 - NANSY++ベースPitch Encoder + SLASH損失関数実装
+**Phase 2 成果**:
+- ✅ CQT変換実装（STFTベース疑似CQT、176 bins抽出）
+- ✅ ピッチシフト処理（CQT空間での±14 binsランダムシフト）
+- ✅ F0確率分布処理（対数周波数スケール + 重み付き平均）
+- ✅ Pitch Consistency Loss（L_cons, Huber norm）実装
+- ✅ ConformerアーキテクチャのSLASH用最適化
+
+**Phase 2残課題**: 設定値統合、STFTベース疑似CQT改良、未使用変数整理
+
+**次のステップ**: Phase 3 - DSP統合・絶対ピッチ学習（SHS、L_guide、L_pseudo）
+
+## Phase 2実装で発見された課題 (2025-08-06)
+
+### 1. **設定値の無視・ハードコーディング問題**
+**影響度**: 🔴 **高** - 設定管理の機能不全
+
+- **dataset.py**: `hop_length=120`, `n_fft=1024`等をハードコーディング
+  - NetworkConfig の `cqt_hop_length`, `cqt_fmin` 等を無視
+- **data.py**: ピッチシフト範囲`(-14, 15)`をハードコーディング  
+  - ModelConfig の `pitch_shift_range: 14` を無視
+- **model.py**: BAP損失重み`0.1`をハードコーディング
+  - 設定から重みを取得する仕組みが未整備
+
+**Phase 3対応**: 設定受け渡し機構を実装し、ハードコーディングを排除
+
+### 2. **未使用変数・不要処理**
+**影響度**: 🟡 **中** - コード品質・パフォーマンス
+
+- **model.py**: `f0_probs`, `f0_probs_shifted`が取得されているが使用されていない
+  - 将来のF0確率分布ベース損失用だが、現在は計算資源の無駄
+- **処理の非効率性**: 不要な推論計算が発生
+
+**Phase 3対応**: F0確率分布ベース損失実装時に活用、または一時的に削除
+
+### 3. **STFTベース疑似CQT実装の限界**
+**影響度**: 🟡 **中** - 特徴抽出品質
+
+- **根本問題**: `torchaudio.transforms.ConstantQ`が存在しないため代替実装
+- **設定の無意味化**: CQT特有設定（`cqt_bins_per_octave`, `cqt_filter_scale`）が機能しない
+- **特徴品質**: 真のCQTと比較して音響特徴の品質が劣る可能性
+
+**Phase 3対応**: 専用CQTライブラリ（librosa等）を使用した真のCQT実装
+
+### 4. **設定受け渡し機構の欠如**  
+**影響度**: 🔴 **高** - 拡張性・保守性
+
+- **preprocess()関数**: DatasetConfigしか受け取らず、NetworkConfig/ModelConfigが未伝達
+- **LazyInputData.generate()**: 設定情報を一切受け取らない設計
+- **結果**: 実装者が設定値を参照できず、ハードコーディングが強制される
+
+**Phase 3対応**: 設定情報を適切に伝達する仕組みを設計・実装
+
+### 5. **バッチ処理の複雑化**
+**影響度**: 🟡 **中** - コード複雑性
+
+- **ピッチシフト=0時の処理**: `cqt_shifted=None`になり、batch.pyで複雑な分岐
+- **学習・推論の非対称**: eval時は常に`cqt_shifted=None`で処理が複雑化
+- **保守性低下**: 条件分岐が多く、バグの温床になりやすい
+
+**Phase 3対応**: ピッチシフト=0時も一貫した処理を行う設計に変更
 
 ### Phase 2: 相対ピッチ学習（推定期間: 4-6日）
 

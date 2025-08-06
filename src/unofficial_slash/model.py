@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import torch
 from torch import Tensor, nn
-from torch.nn.functional import mse_loss
+from torch.nn.functional import huber_loss
 
 from unofficial_slash.batch import BatchOutput
 from unofficial_slash.config import ModelConfig
@@ -19,30 +19,58 @@ class ModelOutput(DataNumProtocol):
     loss: Tensor
     """逆伝播させる損失"""
 
-    # Phase 1: 基本損失項目
-    loss_f0: Tensor
-    loss_bap: Tensor
+    # Phase 2: SLASH損失項目
+    loss_cons: Tensor   # Pitch Consistency Loss (L_cons)
+    loss_bap: Tensor    # Band Aperiodicity Loss (暫定MSE)
 
-    # FIXME: Phase 2でSLASH損失関数追加予定
-    # loss_cons: Tensor   # Pitch Consistency Loss
-    # loss_guide: Tensor  # Pitch Guide Loss
-    # loss_pseudo: Tensor # Pseudo Spectrogram Loss
-    # loss_recon: Tensor  # Reconstruction Loss (GED)
+    # Phase 3以降で追加予定:
+    # loss_guide: Tensor  # Pitch Guide Loss (L_guide)
+    # loss_pseudo: Tensor # Pseudo Spectrogram Loss (L_pseudo)
+    # loss_recon: Tensor  # Reconstruction Loss (L_recon, GED)
 
-    # Phase 1: 基本評価指標
+    # 評価指標
     f0_mae: Tensor  # F0のMAE
 
 
+def pitch_consistency_loss(
+    f0_original: Tensor,  # (B, T) 元のF0値
+    f0_shifted: Tensor,   # (B, T) シフト後のF0値
+    shift_semitones: Tensor,  # (B,) ピッチシフト量（semitones）
+    delta: float = 1.0,   # Huber損失のデルタ
+) -> Tensor:
+    """Pitch Consistency Loss (L_cons) - SLASH論文 Equation (1)"""
+    # log2(p_t) - log2(p_shift_t) + d/12 を計算
+    # 無効値（0Hz以下）を避けるため小さな値を加算
+    eps = 1e-8
+    f0_original_safe = torch.clamp(f0_original, min=eps)
+    f0_shifted_safe = torch.clamp(f0_shifted, min=eps)
+
+    log_diff = torch.log2(f0_original_safe) - torch.log2(f0_shifted_safe)
+
+    # シフト量を octaves に変換 (d/12)
+    shift_octaves = shift_semitones.unsqueeze(1) / 12.0  # (B, 1)
+
+    # 理想的な対数差からの差分を計算
+    target_diff = log_diff + shift_octaves  # (B, T)
+
+    # Huber損失を適用
+    loss = huber_loss(target_diff, torch.zeros_like(target_diff), delta=delta)
+
+    return loss
+
+
 def f0_mean_absolute_error(
-    f0_probs: Tensor,  # (B, T, f0_bins) F0確率分布
+    pred_f0: Tensor,    # (B, T) 予測F0値
     target_f0: Tensor,  # (B, T) ターゲットF0値
 ) -> Tensor:
     """F0のMAE（Mean Absolute Error）を計算"""
-    # FIXME: Phase 2でF0確率分布から期待値を適切に計算
     with torch.no_grad():
-        # Phase 1: 暫定的にランダム予測値でMAE計算
-        pred_f0 = torch.randn_like(target_f0)  # 暫定予測値
-        mae = torch.abs(pred_f0 - target_f0).mean()
+        # 有効なF0値のみでMAE計算（0Hzは無声音なので除外）
+        valid_mask = target_f0 > 0
+        if valid_mask.sum() > 0:
+            mae = torch.abs(pred_f0[valid_mask] - target_f0[valid_mask]).mean()
+        else:
+            mae = torch.tensor(0.0, device=target_f0.device)
         return mae
 
 
@@ -56,35 +84,56 @@ class Model(nn.Module):
 
     def forward(self, batch: BatchOutput) -> ModelOutput:
         """データをネットワークに入力して損失などを計算する"""
-        # FIXME: Phase 2でSLASH損失関数（L_cons, L_guide, L_pseudo, L_recon）を実装
-
-        # Predictorから F0確率分布 と Band Aperiodicity を取得
-        f0_probs, bap = self.predictor(
+        # Predictorから F0確率分布、F0値、Band Aperiodicity を取得
+        # FIXME: Phase 3で f0_probs を使用したF0確率分布ベース損失を実装予定（現在未使用）
+        f0_probs, f0_values, bap = self.predictor(
             cqt=batch.cqt,  # (B, T, ?)
             pitch_label=batch.pitch_label,  # (B, T)
         )
 
-        # Phase 1: 基本MSE損失で暫定実装
+        # Pitch Consistency Loss (L_cons) - SLASH論文 Equation (1)
+        loss_cons = torch.tensor(0.0, device=f0_values.device)
+
+        if batch.cqt_shifted is not None:
+            # シフト済みCQTから F0 を予測
+            # FIXME: Phase 3で f0_probs_shifted を使用したF0確率分布ベース損失を実装予定（現在未使用）
+            f0_probs_shifted, f0_values_shifted, _ = self.predictor(
+                cqt=batch.cqt_shifted,
+                pitch_label=None,
+            )
+
+            # Pitch Consistency Lossを計算
+            loss_cons = pitch_consistency_loss(
+                f0_original=f0_values,
+                f0_shifted=f0_values_shifted,
+                shift_semitones=batch.pitch_shift_semitones,
+            )
+
+        # BAP損失（暫定MSE、Phase 3でより詳細な実装予定）
+        # 無声音部分のaperiodicityは高く、有声音部分は低くなるべき
         target_f0 = batch.pitch_label  # (B, T)
+        voiced_mask = target_f0 > 0  # 有声音マスク
 
-        # F0損失（暫定的にMSE）
-        # FIXME: Phase 2でF0確率分布を使った適切な損失計算に変更
-        dummy_f0_pred = torch.randn_like(target_f0)  # 暫定予測値
-        loss_f0 = mse_loss(dummy_f0_pred, target_f0)
+        # 暫定的なBAP損失（voiced部分は低く、unvoiced部分は高く）
+        bap_target = torch.where(
+            voiced_mask.unsqueeze(-1),
+            torch.zeros_like(bap),    # 有声音: 0に近く
+            torch.ones_like(bap)      # 無声音: 1に近く
+        )
+        loss_bap = huber_loss(bap, bap_target)
 
-        # BAP損失（暫定実装）
-        dummy_bap_target = torch.zeros_like(bap)  # 暫定ターゲット
-        loss_bap = mse_loss(bap, dummy_bap_target)
-
-        # Phase 1: 基本損失の重み付き合成
-        total_loss = loss_f0 + 0.1 * loss_bap
+        # SLASH損失の重み付き合成（論文の重みを使用）
+        total_loss = (
+            self.model_config.w_cons * loss_cons +
+            0.1 * loss_bap  # FIXME: Phase 3で ModelConfig から BAP重み設定を追加・使用すべき（現在ハードコーディング）
+        )
 
         # 評価指標計算
-        f0_mae = f0_mean_absolute_error(f0_probs, target_f0)
+        f0_mae = f0_mean_absolute_error(f0_values, target_f0)
 
         return ModelOutput(
             loss=total_loss,
-            loss_f0=loss_f0,
+            loss_cons=loss_cons,
             loss_bap=loss_bap,
             f0_mae=f0_mae,
             data_num=batch.data_num,
