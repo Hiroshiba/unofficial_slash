@@ -39,19 +39,16 @@ def collate_dataset_output(data_list: list[OutputData]) -> BatchOutput:
     pitch_shifts = [d.pitch_shift_semitones for d in data_list]
     shift_tensor = torch.tensor(pitch_shifts, dtype=torch.float32)
 
-    # シフト済みCQTの処理（Noneの場合があるため注意）
-    cqt_shifted_list = [d.cqt_shifted for d in data_list]
-    cqt_shifted = None
-    if any(cqt is not None for cqt in cqt_shifted_list):
-        # 一部でもシフト済みCQTがある場合は、Noneの部分を元のCQTで埋める
-        for i, cqt in enumerate(cqt_shifted_list):
-            if cqt is None:
-                cqt_shifted_list[i] = data_list[i].cqt
-        cqt_shifted = collate_stack(cqt_shifted_list)
+    # シフト済み音声の処理（一貫した処理: Noneはない）
+    audio_shifted_list = [d.audio_shifted for d in data_list]
+    audio_shifted = None
+    if any(audio is not None for audio in audio_shifted_list):
+        # シフト済み音声がある場合はスタック
+        audio_shifted = collate_stack(audio_shifted_list)
 
     return BatchOutput(
-        cqt=collate_stack([d.cqt for d in data_list]),
+        audio=collate_stack([d.audio for d in data_list]),
         pitch_label=collate_stack([d.pitch_label for d in data_list]),
-        cqt_shifted=cqt_shifted,
+        audio_shifted=audio_shifted,
         pitch_shift_semitones=shift_tensor,
     )

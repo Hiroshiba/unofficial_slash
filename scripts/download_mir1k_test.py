@@ -15,7 +15,7 @@ MIR-1K (Music Information Retrieval - 1000 clips) は歌声分離・ピッチ推
 
 使用方法:
     python scripts/download_mir1k_test.py [--partial] [--skip-existing]
-    
+
     --partial: 評価に必要な最小セット（250クリップ）のみダウンロード
     --skip-existing: 既存ファイルをスキップ
 """
@@ -42,15 +42,15 @@ DATASET_SOURCES = [
         "file_key": "download_url",
         "size_key": "size",
         "md5_key": "computed_md5",
-        "filename_key": "name"
+        "filename_key": "name",
     },
     {
         "name": "Original MIR Lab",
         "direct_urls": [
             "http://mirlab.org/dataset/public/MIR-1K.rar",
-            "http://mirlab.org/dataset/public/MIR-1K_for_MIREX.rar"
-        ]
-    }
+            "http://mirlab.org/dataset/public/MIR-1K_for_MIREX.rar",
+        ],
+    },
 ]
 
 # ダウンロード先ディレクトリ
@@ -87,7 +87,7 @@ def get_dataset_info():
                 response.raise_for_status()
                 record_data = response.json()
 
-                files = record_data.get('files', [])
+                files = record_data.get("files", [])
                 if not files:
                     print(f"  {source_name}: ファイルが見つかりません")
                     continue
@@ -100,11 +100,13 @@ def get_dataset_info():
                     "download_url": file_info[source["file_key"]],
                     "size": file_info[source["size_key"]],
                     "md5": file_info.get(source["md5_key"]),
-                    "metadata": record_data
+                    "metadata": record_data,
                 }
 
-                print(f"  ✓ {source_name}: {download_info['filename']} ({download_info['size'] / 1024 / 1024:.1f} MB)")
-                if download_info['md5']:
+                print(
+                    f"  ✓ {source_name}: {download_info['filename']} ({download_info['size'] / 1024 / 1024:.1f} MB)"
+                )
+                if download_info["md5"]:
                     print(f"    MD5: {download_info['md5']}")
 
                 return download_info
@@ -115,8 +117,8 @@ def get_dataset_info():
                     try:
                         response = requests.head(url, timeout=10)
                         if response.status_code == 200:
-                            filename = url.split('/')[-1]
-                            size = int(response.headers.get('content-length', 0))
+                            filename = url.split("/")[-1]
+                            size = int(response.headers.get("content-length", 0))
 
                             download_info = {
                                 "source": source_name,
@@ -124,10 +126,12 @@ def get_dataset_info():
                                 "download_url": url,
                                 "size": size,
                                 "md5": None,
-                                "metadata": None
+                                "metadata": None,
                             }
 
-                            print(f"  ✓ {source_name}: {filename} ({size / 1024 / 1024:.1f} MB)")
+                            print(
+                                f"  ✓ {source_name}: {filename} ({size / 1024 / 1024:.1f} MB)"
+                            )
                             return download_info
                     except:
                         continue
@@ -148,7 +152,9 @@ def get_dataset_info():
     sys.exit(1)
 
 
-def download_file(url: str, filename: str, expected_size: int, skip_existing: bool = False) -> bool:
+def download_file(
+    url: str, filename: str, expected_size: int, skip_existing: bool = False
+) -> bool:
     """ファイルをダウンロード（進捗表示付き）"""
     file_path = TEMP_DIR / filename
 
@@ -159,7 +165,9 @@ def download_file(url: str, filename: str, expected_size: int, skip_existing: bo
             print(f"SKIP: {filename} (既に存在)")
             return True
         else:
-            print(f"INFO: {filename} のサイズが異なるため再ダウンロード ({actual_size} != {expected_size})")
+            print(
+                f"INFO: {filename} のサイズが異なるため再ダウンロード ({actual_size} != {expected_size})"
+            )
 
     print(f"ダウンロード中: {filename}")
 
@@ -172,7 +180,7 @@ def download_file(url: str, filename: str, expected_size: int, skip_existing: bo
         head_response = session.head(url, allow_redirects=True, timeout=30)
         head_response.raise_for_status()
         final_url = head_response.url
-        content_length = head_response.headers.get('content-length')
+        content_length = head_response.headers.get("content-length")
 
         if content_length:
             total_size = int(content_length)
@@ -188,8 +196,10 @@ def download_file(url: str, filename: str, expected_size: int, skip_existing: bo
 
         downloaded_size = 0
 
-        with open(file_path, 'wb') as f:
-            with tqdm(total=total_size, unit='B', unit_scale=True, desc=filename) as pbar:
+        with open(file_path, "wb") as f:
+            with tqdm(
+                total=total_size, unit="B", unit_scale=True, desc=filename
+            ) as pbar:
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
                         chunk_size = len(chunk)
@@ -234,9 +244,9 @@ def extract_dataset(filename: str):
     print(f"データセット展開中: {archive_path} -> {extract_path}")
 
     try:
-        if filename.lower().endswith('.zip'):
+        if filename.lower().endswith(".zip"):
             # ZIPファイルの場合
-            with zipfile.ZipFile(archive_path, 'r') as zip_ref:
+            with zipfile.ZipFile(archive_path, "r") as zip_ref:
                 file_list = zip_ref.namelist()
                 print(f"アーカイブ内ファイル数: {len(file_list)}")
 
@@ -245,14 +255,15 @@ def extract_dataset(filename: str):
                         zip_ref.extract(file_info, extract_path)
                         pbar.update(1)
 
-        elif filename.lower().endswith('.rar'):
+        elif filename.lower().endswith(".rar"):
             # RARファイルの場合（unrarが必要）
             print("RARファイルを検出、unrarコマンドで展開します")
 
             # unrarの存在確認
             import subprocess
+
             try:
-                subprocess.run(['unrar'], capture_output=True, check=False)
+                subprocess.run(["unrar"], capture_output=True, check=False)
                 unrar_available = True
             except FileNotFoundError:
                 unrar_available = False
@@ -268,29 +279,49 @@ def extract_dataset(filename: str):
             print("unrarコマンドが利用可能です")
 
             # まずアーカイブの内容を確認
-            list_cmd = ['unrar', 'l', str(archive_path)]
+            list_cmd = ["unrar", "l", str(archive_path)]
             try:
-                list_result = subprocess.run(list_cmd, capture_output=True, text=True, check=True)
+                list_result = subprocess.run(
+                    list_cmd, capture_output=True, text=True, check=True
+                )
                 # ファイル数を取得（概算）
-                file_count = len([line for line in list_result.stdout.split('\n') if '.wav' in line or '.txt' in line or '.pv' in line])
+                file_count = len(
+                    [
+                        line
+                        for line in list_result.stdout.split("\n")
+                        if ".wav" in line or ".txt" in line or ".pv" in line
+                    ]
+                )
                 print(f"アーカイブ内推定ファイル数: {file_count}個")
             except subprocess.CalledProcessError:
                 file_count = 1000  # フォールバック値
 
             # unrarでの展開（-oオプションで強制上書き、-yで全て確認なし）
-            extract_cmd = ['unrar', 'x', '-o+', '-y', str(archive_path), str(extract_path) + '/']
+            extract_cmd = [
+                "unrar",
+                "x",
+                "-o+",
+                "-y",
+                str(archive_path),
+                str(extract_path) + "/",
+            ]
             print(f"展開コマンド: {' '.join(extract_cmd)}")
 
             try:
                 with tqdm(total=file_count, desc="RAR展開中", unit="ファイル") as pbar:
-                    process = subprocess.Popen(extract_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                    process = subprocess.Popen(
+                        extract_cmd,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True,
+                    )
 
                     extracted_count = 0
                     while True:
                         output = process.stdout.readline()
-                        if output == '' and process.poll() is not None:
+                        if output == "" and process.poll() is not None:
                             break
-                        if output and ('Extracting' in output or 'OK' in output):
+                        if output and ("Extracting" in output or "OK" in output):
                             extracted_count += 1
                             pbar.update(1)
 
@@ -340,7 +371,9 @@ def create_eval_subset():
     wav_files = list(wav_dir.glob("*.wav"))
 
     if len(wav_files) < EVAL_SUBSET_SIZE:
-        print(f"WARNING: 利用可能ファイル数 ({len(wav_files)}) が評価セット数 ({EVAL_SUBSET_SIZE}) より少ない")
+        print(
+            f"WARNING: 利用可能ファイル数 ({len(wav_files)}) が評価セット数 ({EVAL_SUBSET_SIZE}) より少ない"
+        )
         selected_files = wav_files
     else:
         # 再現性のためのシード設定
@@ -352,7 +385,13 @@ def create_eval_subset():
     eval_dir.mkdir(exist_ok=True)
 
     # サブセット用のディレクトリ構造を作成
-    for subdir in ["Wavfile", "PitchLabel", "UnvoicedFrameLabel", "vocal-nonvocalLabel", "Lyrics"]:
+    for subdir in [
+        "Wavfile",
+        "PitchLabel",
+        "UnvoicedFrameLabel",
+        "vocal-nonvocalLabel",
+        "Lyrics",
+    ]:
         (eval_dir / subdir).mkdir(exist_ok=True)
 
     # 選択されたファイルをコピー
@@ -362,7 +401,13 @@ def create_eval_subset():
         file_stem = wav_file.stem
 
         # 対応するアノテーションファイルを探してコピー
-        for subdir in ["Wavfile", "PitchLabel", "UnvoicedFrameLabel", "vocal-nonvocalLabel", "Lyrics"]:
+        for subdir in [
+            "Wavfile",
+            "PitchLabel",
+            "UnvoicedFrameLabel",
+            "vocal-nonvocalLabel",
+            "Lyrics",
+        ]:
             src_dir = DATASET_DIR / subdir
             dst_dir = eval_dir / subdir
 
@@ -383,8 +428,9 @@ def create_eval_subset():
                 possible_files = list(src_dir.glob(f"{file_stem}.txt"))
             elif subdir in ["UnvoicedFrameLabel", "vocal-nonvocalLabel"]:
                 # 拡張子なしまたは.txtファイルを探す
-                possible_files = (list(src_dir.glob(f"{file_stem}")) +
-                                list(src_dir.glob(f"{file_stem}.txt")))
+                possible_files = list(src_dir.glob(f"{file_stem}")) + list(
+                    src_dir.glob(f"{file_stem}.txt")
+                )
             else:
                 # フォールバック: 元のパターンを使用（より制限的に）
                 possible_files = list(src_dir.glob(f"{file_stem}*"))
@@ -396,7 +442,7 @@ def create_eval_subset():
                 break
 
     # サブセット情報を保存
-    with open(eval_dir / "subset_info.txt", 'w', encoding='utf-8') as f:
+    with open(eval_dir / "subset_info.txt", "w", encoding="utf-8") as f:
         f.write("MIR-1K 評価用サブセット\n")
         uname_info = platform.uname()
         f.write(f"作成日時: {uname_info.node} @ {uname_info.machine}\n")
@@ -422,7 +468,12 @@ def verify_dataset():
     """データセットの整合性確認"""
     print("データセット検証中...")
 
-    required_dirs = ["Wavfile", "PitchLabel", "UnvoicedFrameLabel", "vocal-nonvocalLabel"]
+    required_dirs = [
+        "Wavfile",
+        "PitchLabel",
+        "UnvoicedFrameLabel",
+        "vocal-nonvocalLabel",
+    ]
     found_dirs = []
 
     for req_dir in required_dirs:
@@ -447,14 +498,17 @@ def main():
     parser = argparse.ArgumentParser(
         description="MIR-1K テスト用データセットダウンローダー",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__
+        epilog=__doc__,
     )
-    parser.add_argument("--partial", action="store_true",
-                       help="評価用サブセット（250クリップ）のみ作成")
-    parser.add_argument("--skip-existing", action="store_true",
-                       help="既存ファイルをスキップ")
-    parser.add_argument("--no-cleanup", action="store_true",
-                       help="一時ファイルを削除しない")
+    parser.add_argument(
+        "--partial", action="store_true", help="評価用サブセット（250クリップ）のみ作成"
+    )
+    parser.add_argument(
+        "--skip-existing", action="store_true", help="既存ファイルをスキップ"
+    )
+    parser.add_argument(
+        "--no-cleanup", action="store_true", help="一時ファイルを削除しない"
+    )
 
     args = parser.parse_args()
 
@@ -467,11 +521,11 @@ def main():
     # データセット情報を取得
     dataset_info = get_dataset_info()
 
-    filename = dataset_info['filename']
-    download_url = dataset_info['download_url']
-    expected_size = dataset_info['size']
-    md5_hash = dataset_info['md5']
-    source = dataset_info['source']
+    filename = dataset_info["filename"]
+    download_url = dataset_info["download_url"]
+    expected_size = dataset_info["size"]
+    md5_hash = dataset_info["md5"]
+    source = dataset_info["source"]
 
     print("\nダウンロード準備:")
     print(f"  ソース: {source}")

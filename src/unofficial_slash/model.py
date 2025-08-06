@@ -20,8 +20,8 @@ class ModelOutput(DataNumProtocol):
     """逆伝播させる損失"""
 
     # Phase 2: SLASH損失項目
-    loss_cons: Tensor   # Pitch Consistency Loss (L_cons)
-    loss_bap: Tensor    # Band Aperiodicity Loss (暫定MSE)
+    loss_cons: Tensor  # Pitch Consistency Loss (L_cons)
+    loss_bap: Tensor  # Band Aperiodicity Loss (暫定MSE)
 
     # Phase 3以降で追加予定:
     # loss_guide: Tensor  # Pitch Guide Loss (L_guide)
@@ -34,9 +34,9 @@ class ModelOutput(DataNumProtocol):
 
 def pitch_consistency_loss(
     f0_original: Tensor,  # (B, T) 元のF0値
-    f0_shifted: Tensor,   # (B, T) シフト後のF0値
+    f0_shifted: Tensor,  # (B, T) シフト後のF0値
     shift_semitones: Tensor,  # (B,) ピッチシフト量（semitones）
-    delta: float = 1.0,   # Huber損失のデルタ
+    delta: float = 1.0,  # Huber損失のデルタ
 ) -> Tensor:
     """Pitch Consistency Loss (L_cons) - SLASH論文 Equation (1)"""
     # log2(p_t) - log2(p_shift_t) + d/12 を計算
@@ -60,7 +60,7 @@ def pitch_consistency_loss(
 
 
 def f0_mean_absolute_error(
-    pred_f0: Tensor,    # (B, T) 予測F0値
+    pred_f0: Tensor,  # (B, T) 予測F0値
     target_f0: Tensor,  # (B, T) ターゲットF0値
 ) -> Tensor:
     """F0のMAE（Mean Absolute Error）を計算"""
@@ -87,18 +87,18 @@ class Model(nn.Module):
         # Predictorから F0確率分布、F0値、Band Aperiodicity を取得
         # FIXME: Phase 3で f0_probs を使用したF0確率分布ベース損失を実装予定（現在未使用）
         f0_probs, f0_values, bap = self.predictor(
-            cqt=batch.cqt,  # (B, T, ?)
+            audio=batch.audio,  # (B, T) 音声波形
             pitch_label=batch.pitch_label,  # (B, T)
         )
 
         # Pitch Consistency Loss (L_cons) - SLASH論文 Equation (1)
         loss_cons = torch.tensor(0.0, device=f0_values.device)
 
-        if batch.cqt_shifted is not None:
-            # シフト済みCQTから F0 を予測
+        if batch.audio_shifted is not None:
+            # シフト済み音声から F0 を予測
             # FIXME: Phase 3で f0_probs_shifted を使用したF0確率分布ベース損失を実装予定（現在未使用）
             f0_probs_shifted, f0_values_shifted, _ = self.predictor(
-                cqt=batch.cqt_shifted,
+                audio=batch.audio_shifted,
                 pitch_label=None,
             )
 
@@ -117,15 +117,15 @@ class Model(nn.Module):
         # 暫定的なBAP損失（voiced部分は低く、unvoiced部分は高く）
         bap_target = torch.where(
             voiced_mask.unsqueeze(-1),
-            torch.zeros_like(bap),    # 有声音: 0に近く
-            torch.ones_like(bap)      # 無声音: 1に近く
+            torch.zeros_like(bap),  # 有声音: 0に近く
+            torch.ones_like(bap),  # 無声音: 1に近く
         )
         loss_bap = huber_loss(bap, bap_target)
 
         # SLASH損失の重み付き合成（論文の重みを使用）
         total_loss = (
-            self.model_config.w_cons * loss_cons +
-            0.1 * loss_bap  # FIXME: Phase 3で ModelConfig から BAP重み設定を追加・使用すべき（現在ハードコーディング）
+            self.model_config.w_cons * loss_cons
+            + self.model_config.w_bap * loss_bap  # 設定からBAP重みを取得
         )
 
         # 評価指標計算

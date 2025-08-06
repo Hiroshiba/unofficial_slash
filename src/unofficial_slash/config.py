@@ -28,10 +28,6 @@ class DatasetConfig(BaseModel):
     frame_rate: float
     frame_length: int
 
-
-class NetworkConfig(BaseModel):
-    """SLASH Pitch Encoder ネットワークの設定"""
-
     # CQT 設定
     cqt_bins: int
     cqt_total_bins: int
@@ -39,6 +35,13 @@ class NetworkConfig(BaseModel):
     cqt_bins_per_octave: int
     cqt_fmin: float
     cqt_filter_scale: float
+
+    # ピッチシフト設定
+    pitch_shift_range: int
+
+
+class NetworkConfig(BaseModel):
+    """SLASH Pitch Encoder ネットワークの設定"""
 
     # Pitch Encoder 設定
     f0_bins: int
@@ -56,13 +59,13 @@ class ModelConfig(BaseModel):
     w_pseudo: float
     w_recon: float
     w_aug: float
+    w_bap: float
 
     # 損失パラメータ
     hinge_margin: float
     ged_alpha: float
     vuv_threshold: float
     epsilon: float
-    pitch_shift_range: int
 
 
 class TrainConfig(BaseModel):

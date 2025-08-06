@@ -14,7 +14,7 @@ SLASH論文では LibriTTS-R の全学習データを使用して学習を行い
 
 使用方法:
     python scripts/download_libritts_train.py [options]
-    
+
     --subsets: ダウンロードするサブセット選択（デフォルト: 全学習用セット）
     --parallel: 並列ダウンロード数（デフォルト: 4, 最大: 16）
     --skip-existing: 既存ファイルをスキップ
@@ -26,7 +26,6 @@ import asyncio
 import random
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
 
 import aiofiles
 import aiohttp
@@ -40,18 +39,18 @@ MIRROR_SERVERS = [
     {
         "name": "US Mirror (openslr.org)",
         "base_url": "http://www.openslr.org/resources/141/",
-        "priority": 1
+        "priority": 1,
     },
     {
         "name": "EU Mirror",
         "base_url": "http://openslr.elda.org/resources/141/",
-        "priority": 2
+        "priority": 2,
     },
     {
         "name": "CN Mirror",
         "base_url": "http://openslr.magicdatatech.com/resources/141/",
-        "priority": 3
-    }
+        "priority": 3,
+    },
 ]
 
 # サブセット情報（ファイル名、サイズ、説明）
@@ -63,7 +62,7 @@ SUBSETS_INFO = {
         "size_bytes": 8699023360,  # 概算
         "description": "学習セット - clean 100時間",
         "category": "train",
-        "priority": 1
+        "priority": 1,
     },
     "train_clean_360": {
         "filename": "train_clean_360.tar.gz",
@@ -71,7 +70,7 @@ SUBSETS_INFO = {
         "size_bytes": 30064771072,  # 概算
         "description": "学習セット - clean 360時間",
         "category": "train",
-        "priority": 1
+        "priority": 1,
     },
     "train_other_500": {
         "filename": "train_other_500.tar.gz",
@@ -79,9 +78,8 @@ SUBSETS_INFO = {
         "size_bytes": 49392123392,  # 概算
         "description": "学習セット - other 500時間",
         "category": "train",
-        "priority": 1
+        "priority": 1,
     },
-
     # 評価用データ（小さなセット）
     "dev_clean": {
         "filename": "dev_clean.tar.gz",
@@ -89,7 +87,7 @@ SUBSETS_INFO = {
         "size_bytes": 1395864371,  # 概算
         "description": "開発セット - clean",
         "category": "eval",
-        "priority": 2
+        "priority": 2,
     },
     "dev_other": {
         "filename": "dev_other.tar.gz",
@@ -97,7 +95,7 @@ SUBSETS_INFO = {
         "size_bytes": 1046478233,  # 概算
         "description": "開発セット - other",
         "category": "eval",
-        "priority": 2
+        "priority": 2,
     },
     "test_clean": {
         "filename": "test_clean.tar.gz",
@@ -105,7 +103,7 @@ SUBSETS_INFO = {
         "size_bytes": 1288490189,  # 概算
         "description": "テストセット - clean",
         "category": "eval",
-        "priority": 2
+        "priority": 2,
     },
     "test_other": {
         "filename": "test_other.tar.gz",
@@ -113,9 +111,8 @@ SUBSETS_INFO = {
         "size_bytes": 1073741824,  # 概算
         "description": "テストセット - other",
         "category": "eval",
-        "priority": 2
+        "priority": 2,
     },
-
     # 補助ファイル
     "doc": {
         "filename": "doc.tar.gz",
@@ -123,8 +120,8 @@ SUBSETS_INFO = {
         "size_bytes": 325632,  # 318K
         "description": "ドキュメント",
         "category": "misc",
-        "priority": 3
-    }
+        "priority": 3,
+    },
 }
 
 # ダウンロード先ディレクトリ
@@ -159,7 +156,9 @@ def get_download_plan(subsets: list[str], test_only: bool = False) -> list[dict]
         plan_subsets = list(SUBSETS_INFO.keys())
     elif subsets == ["train"]:
         # 学習用のみ（デフォルト、SLASH論文用）
-        plan_subsets = [s for s, info in SUBSETS_INFO.items() if info["category"] == "train"]
+        plan_subsets = [
+            s for s, info in SUBSETS_INFO.items() if info["category"] == "train"
+        ]
         plan_subsets.append("doc")  # ドキュメントも含める
     else:
         # 指定されたサブセット
@@ -178,14 +177,16 @@ def get_download_plan(subsets: list[str], test_only: bool = False) -> list[dict]
         info = SUBSETS_INFO[subset]
         total_size_gb += info["size_gb"]
 
-        download_plan.append({
-            "subset": subset,
-            "filename": info["filename"],
-            "size_bytes": info["size_bytes"],
-            "size_gb": info["size_gb"],
-            "description": info["description"],
-            "category": info["category"]
-        })
+        download_plan.append(
+            {
+                "subset": subset,
+                "filename": info["filename"],
+                "size_bytes": info["size_bytes"],
+                "size_gb": info["size_gb"],
+                "description": info["description"],
+                "category": info["category"],
+            }
+        )
 
     # 優先度順にソート（学習用データを先に）
     download_plan.sort(key=lambda x: SUBSETS_INFO[x["subset"]]["priority"])
@@ -200,12 +201,16 @@ def get_download_plan(subsets: list[str], test_only: bool = False) -> list[dict]
     return download_plan
 
 
-async def check_file_availability(session: aiohttp.ClientSession, url: str) -> tuple[bool, int]:
+async def check_file_availability(
+    session: aiohttp.ClientSession, url: str
+) -> tuple[bool, int]:
     """ファイルの可用性とサイズをチェック"""
     try:
-        async with session.head(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+        async with session.head(
+            url, timeout=aiohttp.ClientTimeout(total=30)
+        ) as response:
             if response.status == 200:
-                content_length = response.headers.get('content-length')
+                content_length = response.headers.get("content-length")
                 size = int(content_length) if content_length else 0
                 return True, size
             return False, 0
@@ -220,7 +225,7 @@ async def download_file_from_mirror(
     expected_size: int,
     semaphore: asyncio.Semaphore,
     progress_bar: tqdm,
-    skip_existing: bool = False
+    skip_existing: bool = False,
 ) -> bool:
     """ミラーサーバーからファイルをダウンロード"""
     async with semaphore:  # 並列数制限
@@ -245,18 +250,24 @@ async def download_file_from_mirror(
                 # ファイル可用性チェック
                 available, actual_size = await check_file_availability(session, url)
                 if not available:
-                    progress_bar.write(f"[{mirror['name']}] ファイル利用不可: {filename}")
+                    progress_bar.write(
+                        f"[{mirror['name']}] ファイル利用不可: {filename}"
+                    )
                     return False
 
                 if actual_size > 0 and abs(actual_size - expected_size) > 1024:
-                    progress_bar.write(f"[{mirror['name']}] WARNING: サイズ不一致 {filename}")
+                    progress_bar.write(
+                        f"[{mirror['name']}] WARNING: サイズ不一致 {filename}"
+                    )
 
                 # ダウンロード実行
                 downloaded_size = 0
-                async with session.get(url, timeout=aiohttp.ClientTimeout(total=3600)) as response:
+                async with session.get(
+                    url, timeout=aiohttp.ClientTimeout(total=3600)
+                ) as response:
                     response.raise_for_status()
 
-                    async with aiofiles.open(file_path, 'wb') as f:
+                    async with aiofiles.open(file_path, "wb") as f:
                         async for chunk in response.content.iter_chunked(CHUNK_SIZE):
                             await f.write(chunk)
                             chunk_size = len(chunk)
@@ -266,13 +277,19 @@ async def download_file_from_mirror(
                 # ダウンロード完了確認
                 final_size = file_path.stat().st_size
                 if abs(final_size - expected_size) > 1024:
-                    progress_bar.write(f"[{mirror['name']}] WARNING: {filename} サイズ不一致")
+                    progress_bar.write(
+                        f"[{mirror['name']}] WARNING: {filename} サイズ不一致"
+                    )
 
-                progress_bar.write(f"[{mirror['name']}] 完了: {filename} ({final_size / 1024 / 1024:.1f} MB)")
+                progress_bar.write(
+                    f"[{mirror['name']}] 完了: {filename} ({final_size / 1024 / 1024:.1f} MB)"
+                )
                 return True
 
             except Exception as e:
-                progress_bar.write(f"[{mirror['name']}] エラー (試行 {attempt + 1}/{RETRY_ATTEMPTS}): {filename} - {e}")
+                progress_bar.write(
+                    f"[{mirror['name']}] エラー (試行 {attempt + 1}/{RETRY_ATTEMPTS}): {filename} - {e}"
+                )
 
                 if attempt < RETRY_ATTEMPTS - 1:
                     await asyncio.sleep(RETRY_DELAY * (attempt + 1))
@@ -286,9 +303,7 @@ async def download_file_from_mirror(
 
 
 async def parallel_download_with_mirrors(
-    download_plan: list[dict],
-    parallel_count: int,
-    skip_existing: bool = False
+    download_plan: list[dict], parallel_count: int, skip_existing: bool = False
 ) -> bool:
     """複数ミラーを使用した並列ダウンロード"""
     print(f"\n=== 並列ダウンロード開始 ({parallel_count}並列) ===")
@@ -298,11 +313,7 @@ async def parallel_download_with_mirrors(
 
     # 進捗バー初期化
     progress_bar = tqdm(
-        total=total_size,
-        unit='B',
-        unit_scale=True,
-        desc="総進捗",
-        position=0
+        total=total_size, unit="B", unit_scale=True, desc="総進捗", position=0
     )
 
     # セマフォで並列数制限
@@ -313,7 +324,7 @@ async def parallel_download_with_mirrors(
         limit=parallel_count * 2,
         limit_per_host=parallel_count,
         keepalive_timeout=30,
-        enable_cleanup_closed=True
+        enable_cleanup_closed=True,
     )
 
     timeout = aiohttp.ClientTimeout(total=3600, connect=60)
@@ -321,9 +332,8 @@ async def parallel_download_with_mirrors(
     async with aiohttp.ClientSession(
         connector=connector,
         timeout=timeout,
-        headers={"User-Agent": "LibriTTS-R-Downloader/1.0"}
+        headers={"User-Agent": "LibriTTS-R-Downloader/1.0"},
     ) as session:
-
         # ダウンロードタスクを作成
         tasks = []
 
@@ -340,10 +350,15 @@ async def parallel_download_with_mirrors(
 
             task = asyncio.create_task(
                 download_file_from_mirror(
-                    session, selected_mirror, filename, expected_size,
-                    semaphore, progress_bar, skip_existing
+                    session,
+                    selected_mirror,
+                    filename,
+                    expected_size,
+                    semaphore,
+                    progress_bar,
+                    skip_existing,
                 ),
-                name=f"download-{filename}"
+                name=f"download-{filename}",
             )
             tasks.append((task, item, mirrors[1:]))  # 残りのミラーも保持
 
@@ -366,7 +381,9 @@ async def parallel_download_with_mirrors(
 
         # 失敗したファイルをバックアップミラーで再試行
         if failed_items:
-            progress_bar.write(f"\n=== バックアップミラーで再試行 ({len(failed_items)}ファイル) ===")
+            progress_bar.write(
+                f"\n=== バックアップミラーで再試行 ({len(failed_items)}ファイル) ==="
+            )
 
             retry_tasks = []
             for item, backup_mirrors in failed_items:
@@ -377,10 +394,15 @@ async def parallel_download_with_mirrors(
 
                     retry_task = asyncio.create_task(
                         download_file_from_mirror(
-                            session, backup_mirror, filename, expected_size,
-                            semaphore, progress_bar, skip_existing
+                            session,
+                            backup_mirror,
+                            filename,
+                            expected_size,
+                            semaphore,
+                            progress_bar,
+                            skip_existing,
                         ),
-                        name=f"retry-{filename}"
+                        name=f"retry-{filename}",
                     )
                     retry_tasks.append((retry_task, item))
 
@@ -434,7 +456,7 @@ async def extract_archives(download_plan: list[dict]) -> bool:
             extract_path = DATASET_DIR / item["subset"]
             extract_path.mkdir(exist_ok=True)
 
-            with tarfile.open(archive_path, 'r:gz') as tar:
+            with tarfile.open(archive_path, "r:gz") as tar:
                 tar.extractall(path=extract_path)
 
             print(f"✓ 展開完了: {filename}")
@@ -452,6 +474,7 @@ def cleanup_temp_files():
     if TEMP_DIR.exists():
         print("一時ファイルをクリーンアップ中...")
         import shutil
+
         shutil.rmtree(TEMP_DIR)
 
 
@@ -482,27 +505,41 @@ async def main():
     parser = argparse.ArgumentParser(
         description="LibriTTS-R 学習用データセットダウンローダー",
         formatter_class=argparse.RawDescriptionHelpFormatter,
-        epilog=__doc__
+        epilog=__doc__,
     )
 
-    parser.add_argument("--subsets", nargs="+", default=["train"],
-                       choices=list(SUBSETS_INFO.keys()) + ["all", "train"],
-                       help="ダウンロードするサブセット (デフォルト: train=学習用セット)")
+    parser.add_argument(
+        "--subsets",
+        nargs="+",
+        default=["train"],
+        choices=list(SUBSETS_INFO.keys()) + ["all", "train"],
+        help="ダウンロードするサブセット (デフォルト: train=学習用セット)",
+    )
 
-    parser.add_argument("--parallel", type=int, default=DEFAULT_PARALLEL_DOWNLOADS,
-                       help=f"並列ダウンロード数 (1-{MAX_PARALLEL_DOWNLOADS}, デフォルト: {DEFAULT_PARALLEL_DOWNLOADS})")
+    parser.add_argument(
+        "--parallel",
+        type=int,
+        default=DEFAULT_PARALLEL_DOWNLOADS,
+        help=f"並列ダウンロード数 (1-{MAX_PARALLEL_DOWNLOADS}, デフォルト: {DEFAULT_PARALLEL_DOWNLOADS})",
+    )
 
-    parser.add_argument("--skip-existing", action="store_true",
-                       help="既存ファイルをスキップ")
+    parser.add_argument(
+        "--skip-existing", action="store_true", help="既存ファイルをスキップ"
+    )
 
-    parser.add_argument("--test-only", action="store_true",
-                       help="テスト・dev用の小さなセットのみダウンロード (約4GB)")
+    parser.add_argument(
+        "--test-only",
+        action="store_true",
+        help="テスト・dev用の小さなセットのみダウンロード (約4GB)",
+    )
 
-    parser.add_argument("--no-cleanup", action="store_true",
-                       help="一時ファイルを削除しない")
+    parser.add_argument(
+        "--no-cleanup", action="store_true", help="一時ファイルを削除しない"
+    )
 
-    parser.add_argument("--no-extract", action="store_true",
-                       help="アーカイブを展開しない")
+    parser.add_argument(
+        "--no-extract", action="store_true", help="アーカイブを展開しない"
+    )
 
     args = parser.parse_args()
 
@@ -565,7 +602,9 @@ async def main():
     print("3. 必要に応じて前処理を実行")
 
     print("\nSLASH学習実行例:")
-    print(f"python train.py --dataset libritts-r --data_root {DATASET_DIR} --max_steps 100000")
+    print(
+        f"python train.py --dataset libritts-r --data_root {DATASET_DIR} --max_steps 100000"
+    )
 
 
 if __name__ == "__main__":

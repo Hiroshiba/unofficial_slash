@@ -12,7 +12,6 @@ class InputData:
     """データ処理前のデータ構造"""
 
     audio: numpy.ndarray  # (T,) 音声波形
-    cqt: numpy.ndarray  # (T, ?) CQT特徴量
     pitch_label: numpy.ndarray  # (T,) ピッチラベル（セミトーンまたはHz）
 
 
@@ -20,82 +19,102 @@ class InputData:
 class OutputData:
     """データ処理後のデータ構造"""
 
-    cqt: Tensor  # (T, ?) CQT特徴量
+    audio: Tensor  # (T,) 音声波形
     pitch_label: Tensor  # (T,) ピッチラベル
-    cqt_shifted: Tensor | None  # (T, ?) シフト済みCQT（ピッチシフト用）
+    audio_shifted: Tensor | None  # (T,) シフト済み音声（ピッチシフト用）
     pitch_shift_semitones: float  # ピッチシフト量（semitones）
 
 
-def apply_pitch_shift_cqt(cqt: numpy.ndarray, shift_bins: int) -> numpy.ndarray:
-    """CQTにピッチシフトを適用（周波数軸シフト）"""
-    if shift_bins == 0:
-        return cqt.copy()
+def apply_pitch_shift_audio(
+    audio: numpy.ndarray, shift_semitones: float, sample_rate: int = 24000
+) -> numpy.ndarray:
+    """音声にピッチシフトを適用（時間伸縮ベース）"""
+    if shift_semitones == 0:
+        return audio.copy()
 
-    cqt_shifted = numpy.zeros_like(cqt)
-    if shift_bins > 0:
-        # 上にシフト（高周波数側）
-        cqt_shifted[:, shift_bins:] = cqt[:, :-shift_bins]
-    else:
-        # 下にシフト（低周波数側）
-        cqt_shifted[:, :shift_bins] = cqt[:, -shift_bins:]
+    # シンプルなリサンプリングベースのピッチシフト実装
+    # shift_semitones > 0: 高い音にシフト（速くする）
+    # shift_semitones < 0: 低い音にシフト（遅くする）
+    shift_factor = 2 ** (shift_semitones / 12.0)
 
-    return cqt_shifted
+    # 時間軸インデックスを伸縮
+    original_length = len(audio)
+    new_indices = numpy.arange(0, original_length, shift_factor)
+
+    # 線形補間でサンプリング
+    audio_shifted = numpy.interp(new_indices, numpy.arange(original_length), audio)
+
+    # 元の長さに合わせる（ゼロパディングまたはトリミング）
+    if len(audio_shifted) > original_length:
+        audio_shifted = audio_shifted[:original_length]
+    elif len(audio_shifted) < original_length:
+        padding = original_length - len(audio_shifted)
+        audio_shifted = numpy.pad(audio_shifted, (0, padding), mode="constant")
+
+    return audio_shifted
 
 
 def preprocess(
-    d: InputData, *, frame_rate: float, frame_length: int, is_eval: bool
+    d: InputData,
+    *,
+    frame_rate: float,
+    frame_length: int,
+    is_eval: bool,
+    pitch_shift_range: int,
+    sample_rate: int = 24000,
 ) -> OutputData:
     """データ処理"""
-    # FIXME: Phase 3で設定受け渡し - 現在はNetworkConfig, ModelConfigを受け取る仕組みがない
-    cqt_features = d.cqt.astype(numpy.float32)
+    audio_data = d.audio.astype(numpy.float32)
     pitch_labels = d.pitch_label.astype(numpy.float32)
 
-    # フレーム長に合わせて切り出しまたはパディング
-    target_frames = frame_length
-    if cqt_features.shape[0] > target_frames:
+    # 音声長をフレーム長に対応させる
+    # frame_rate (200Hz) からサンプル数を計算
+    samples_per_frame = sample_rate // int(
+        frame_rate
+    )  # 24000 / 200 = 120 samples/frame
+    target_samples = frame_length * samples_per_frame
+
+    # 音声データの長さ調整
+    if len(audio_data) > target_samples:
         # ランダム切り出し（evalの場合は先頭から）
         if is_eval:
             start_idx = 0
         else:
-            start_idx = numpy.random.randint(
-                0, cqt_features.shape[0] - target_frames + 1
-            )
-        cqt_features = cqt_features[start_idx : start_idx + target_frames]
-        pitch_labels = (
-            pitch_labels[start_idx : start_idx + target_frames]
-            if len(pitch_labels) > start_idx
-            else pitch_labels[:target_frames]
-        )
-    elif cqt_features.shape[0] < target_frames:
+            start_idx = numpy.random.randint(0, len(audio_data) - target_samples + 1)
+        audio_data = audio_data[start_idx : start_idx + target_samples]
+    elif len(audio_data) < target_samples:
         # ゼロパディング
-        pad_length = target_frames - cqt_features.shape[0]
-        cqt_features = numpy.pad(
-            cqt_features, ((0, pad_length), (0, 0)), mode="constant"
-        )
-        pitch_labels = numpy.pad(pitch_labels, (0, pad_length), mode="constant")
+        padding = target_samples - len(audio_data)
+        audio_data = numpy.pad(audio_data, (0, padding), mode="constant")
 
-    # 長さ調整
-    min_len = min(len(cqt_features), len(pitch_labels))
-    cqt_features = cqt_features[:min_len]
-    pitch_labels = pitch_labels[:min_len]
+    # ピッチラベルも合わせる（フレーム単位で線形補間）
+    target_frames = frame_length
+    if len(pitch_labels) != target_frames:
+        frame_indices = numpy.linspace(0, len(pitch_labels) - 1, target_frames)
+        pitch_labels = numpy.interp(
+            frame_indices, numpy.arange(len(pitch_labels)), pitch_labels
+        )
 
     # ピッチシフト処理（SLASH論文 Section 2.2）
-    cqt_shifted = None
+    audio_shifted = None
     pitch_shift_semitones = 0.0
 
     if not is_eval:
-        # 学習時: ±14 binsのランダムシフト（論文仕様）
-        # FIXME: Phase 3で ModelConfig.pitch_shift_range を使用すべき（現在は設定値14を無視してハードコーディング）
-        pitch_shift_bins = numpy.random.randint(-14, 15)  # -14 to +14  # FIXME: ハードコーディング
-        pitch_shift_semitones = float(pitch_shift_bins)  # 1 bin = 1 semitone
+        # 学習時: ±pitch_shift_rangeのランダムシフト
+        pitch_shift_bins = numpy.random.randint(
+            -pitch_shift_range, pitch_shift_range + 1
+        )
+        pitch_shift_semitones = float(pitch_shift_bins)
 
-        if pitch_shift_bins != 0:
-            cqt_shifted_np = apply_pitch_shift_cqt(cqt_features, pitch_shift_bins)
-            cqt_shifted = torch.from_numpy(cqt_shifted_np).float()
+        # 一貫した処理: shift=0でも同じパスを通る
+        audio_shifted_np = apply_pitch_shift_audio(
+            audio_data, pitch_shift_semitones, sample_rate
+        )
+        audio_shifted = torch.from_numpy(audio_shifted_np).float()
 
     return OutputData(
-        cqt=torch.from_numpy(cqt_features).float(),
+        audio=torch.from_numpy(audio_data).float(),
         pitch_label=torch.from_numpy(pitch_labels).float(),
-        cqt_shifted=cqt_shifted,
+        audio_shifted=audio_shifted,
         pitch_shift_semitones=pitch_shift_semitones,
     )

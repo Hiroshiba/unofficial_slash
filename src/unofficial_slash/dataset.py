@@ -8,7 +8,6 @@ from pathlib import Path
 from typing import assert_never
 
 import numpy
-import torch
 import torchaudio
 from torch.utils.data import Dataset as BaseDataset
 
@@ -37,67 +36,19 @@ class LazyInputData:
             resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=24000)
             audio = resampler(audio)
 
-        # CQT変換（SLASH論文仕様: Equation (2)周辺の設定）
-        # torchaudio.functionalのSTFTベース実装で代替
-        # FIXME: Phase 3でより正確なCQT実装に変更予定
-        # FIXME: Phase 3で設定値統合 - 現在はNetworkConfigのcqt_hop_length, cqt_fminを無視してハードコーディング
-        stft = torch.stft(
-            audio.squeeze(0),
-            n_fft=1024,  # FIXME: NetworkConfig.cqt_total_binsから計算すべき
-            hop_length=120,  # FIXME: NetworkConfig.cqt_hop_lengthを使用すべき
-            win_length=1024,  # FIXME: 設定値から計算すべき
-            window=torch.hann_window(1024),
-            return_complex=True,
-        )
-
-        # STFTから疑似CQTを作成（論文の205 binsに合わせて調整）
-        # 実際のCQTの代替として、対数周波数軸を近似
-        magnitude = torch.abs(stft)  # (freq_bins, T)
-
-        # 205 binsに調整（STFTの513 binsから）
-        # FIXME: Phase 3で NetworkConfig.cqt_total_bins を使用すべき
-        target_bins = 205  # FIXME: ハードコーディング
-        freq_bins = magnitude.shape[0]
-
-        if freq_bins >= target_bins:
-            # ダウンサンプリング
-            indices = torch.linspace(0, freq_bins - 1, target_bins, dtype=torch.long)
-            cqt_full = magnitude[indices, :].unsqueeze(0)  # (1, 205, T)
-        else:
-            # アップサンプリング（線形補間）
-            old_indices = torch.arange(freq_bins, dtype=torch.float32)
-            new_indices = torch.linspace(0, freq_bins - 1, target_bins)
-            cqt_full = torch.nn.functional.interpolate(
-                magnitude.unsqueeze(0).unsqueeze(0),  # (1, 1, freq_bins, T)
-                size=(target_bins, magnitude.shape[1]),
-                mode='bilinear',
-                align_corners=False
-            ).squeeze(0)  # (1, 205, T)
-
-        # 中央176 binsを抽出（論文: "processes the central 176 bins"）
-        # 205 bins中の中央176 binsを取得
-        # FIXME: Phase 3で NetworkConfig.cqt_bins, cqt_total_bins を使用すべき
-        start_bin = (205 - 176) // 2  # 14.5 -> 14  # FIXME: ハードコーディング
-        end_bin = start_bin + 176     # 14 + 176 = 190  # FIXME: ハードコーディング
-        cqt_central = cqt_full[0, start_bin:end_bin, :].transpose(0, 1)  # (T, 176)
-
         # ピッチラベル読み込み（オプション）
         pitch_data = None
         if self.pitch_label_path is not None:
             pitch_data = numpy.loadtxt(self.pitch_label_path)
 
-        # フレーム数に合わせてピッチラベル調整
-        cqt_frames = cqt_central.shape[0]
-        if pitch_data is not None and len(pitch_data) != cqt_frames:
-            # 線形補間でフレーム数を合わせる
-            old_indices = numpy.linspace(0, len(pitch_data)-1, len(pitch_data))
-            new_indices = numpy.linspace(0, len(pitch_data)-1, cqt_frames)
-            pitch_data = numpy.interp(new_indices, old_indices, pitch_data)
+        # デフォルトピッチラベルを音声長に合わせて生成（後でフレーム単位に調整）
+        if pitch_data is None:
+            # 仮の長さでゼロ配列を作成（preprocessで正確に調整される）
+            pitch_data = numpy.zeros(1000, dtype=numpy.float32)
 
         return InputData(
-            audio=audio.squeeze(0).numpy(),  # (T,)
-            cqt=cqt_central.numpy().astype(numpy.float32),  # (T, 176)
-            pitch_label=pitch_data if pitch_data is not None else numpy.zeros(cqt_frames, dtype=numpy.float32),
+            audio=audio.squeeze(0).numpy(),  # (T,) 音声波形
+            pitch_label=pitch_data.astype(numpy.float32),  # (T,) ピッチラベル
         )
 
 
@@ -129,6 +80,8 @@ class Dataset(BaseDataset[OutputData]):
             frame_rate=self.config.frame_rate,
             frame_length=self.config.frame_length,
             is_eval=self.is_eval,
+            pitch_shift_range=self.config.pitch_shift_range,
+            sample_rate=self.config.sample_rate,
         )
 
 

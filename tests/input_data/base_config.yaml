@@ -14,7 +14,6 @@ dataset:
   frame_rate: 200.0
   frame_length: 480
 
-network:
   # CQT 設定
   cqt_bins: 176
   cqt_total_bins: 205
@@ -22,7 +21,11 @@ network:
   cqt_bins_per_octave: 24
   cqt_fmin: 32.70
   cqt_filter_scale: 0.5
-  
+
+  # ピッチシフト設定
+  pitch_shift_range: 14
+
+network:
   # Pitch Encoder 設定
   f0_bins: 1024
   bap_bins: 8
@@ -36,13 +39,13 @@ model:
   w_pseudo: 10.0
   w_recon: 5.0
   w_aug: 1.0
+  w_bap: 0.1  # Band Aperiodicity損失重み
   
   # 損失パラメータ
   hinge_margin: 0.5
   ged_alpha: 0.1
   vuv_threshold: 0.5
   epsilon: 0.001
-  pitch_shift_range: 14
 
 train:
   batch_size: 17
