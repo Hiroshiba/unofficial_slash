@@ -39,7 +39,7 @@ class NetworkConfig(BaseModel):
     cqt_bins_per_octave: int
     cqt_fmin: float
     cqt_filter_scale: float
-    
+
     # Pitch Encoder 設定
     f0_bins: int
     bap_bins: int
@@ -56,7 +56,7 @@ class ModelConfig(BaseModel):
     w_pseudo: float
     w_recon: float
     w_aug: float
-    
+
     # 損失パラメータ
     hinge_margin: float
     ged_alpha: float

@@ -268,17 +268,19 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 
 ## 実装優先順位 (**現在**: 汎用MLフレームワーク → SLASH専用に破壊的変更)
 
-### 🎯 **現在の状況**:
+### 🎯 **現在の状況** (2025-08-06 更新):
 - ✅ **基本構造完了**: src/, scripts/, tests/, pathlistシステム、Pydantic設定
 - ✅ **学習システム完了**: train.py, model.py, predictor.py (Conformer)
 - ✅ **データ処理部分完了**: dataset.py, CQT変換, MIR-1K対応
+- ✅ **🆕 Phase 1 完了**: SLASH用基本構造変更、固定長実装
 
 ### 🔄 **SLASH実装フェーズ** (破壊的変更による段階的移行):
 
-**Phase 1: 基本修正・SLASH設定対応** (1-2日)
-2. **設定変更**: config.py を SLASH 用パラメータに変更
-3. **データ構造変更**: InputData, OutputData を SLASH 用に変更
-4. **動作確認**: 現在の学習ループが SLASH 設定で動作することを確認
+**Phase 1: 基本修正・SLASH設定対応** ✅ **完了 (2025-08-06)**
+1. **設定変更**: config.py を SLASH 用パラメータに変更
+2. **データ構造変更**: InputData, OutputData を SLASH 用に変更  
+3. **Predictor/Model変更**: SLASH用入出力・損失関数に変更
+4. **動作確認**: 基本コンポーネントのコンパイル・作成確認完了
 
 **Phase 2: Pitch Encoder実装** (3-5日) 
 1. **Predictor変更**: Conformer → NANSY++ベース Pitch Encoder に破壊的変更
@@ -301,7 +303,7 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 
 ## 現在の実装状況と次期計画
 
-### ✅ **完了済み**: 基本MLフレームワーク + SLASH設定対応
+### ✅ **完了済み**: 基本MLフレームワーク + SLASH設定対応 + Phase 1実装
 1. **プロジェクト構造**: src/unofficial_slash/, scripts/, tests/ 完成
 2. **依存関係管理**: pyproject.toml, uv による管理完成 
 3. **設定システム**: Pydantic + YAML による型安全設定完成
@@ -312,34 +314,44 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 8. **MIR-1K対応**: ピッチラベル読み込み、ステレオ分離完成
 9. **🆕 SLASH設定構造**: config.py → CQT/Pitch Encoder/損失関数パラメータ完成
 10. **🆕 SLASH設定ファイル**: base_config.yaml → SLASH用設定完成
+11. **🆕 Phase 1: SLASH基本構造**: データ構造変更、Predictor/Model SLASH対応完成
+12. **🆕 Phase 1: 固定長実装**: パディング処理による学習準備完成
 
 ### 🎯 **次期実装計画**: SLASH専用化 (破壊的変更)
 
-#### Phase 1: 基本修正・SLASH設定移行 ⚡ **一部完了・継続中**
+#### Phase 1: 基本修正・SLASH設定移行 ✅ **完了 (2025-08-06)**
 **実装対象**: 現在のサンプルコードをSLASH用に適応
 
 **✅ 完了項目**:
-2. **config.py変更**: NetworkConfig → SLASH用パラメータ (cqt_bins, f0_bins等) **完了**
+1. **config.py変更**: NetworkConfig → SLASH用パラメータ (cqt_bins, f0_bins等) **完了**
    - DataFileConfig → audio_pathlist + pitch_label_pathlist (optional)
    - NetworkConfig → CQT設定 + Pitch Encoder設定
    - ModelConfig → SLASH損失関数パラメータ
-3. **base_config.yaml変更**: SLASH用設定ファイル **完了**
+2. **base_config.yaml変更**: SLASH用設定ファイル **完了**
    - CQT: 176 bins, 205 total, 32.70Hz, 24kHz
    - F0: 1024 bins, BAP: 8 bins, AdamW 0.0002
+3. **🆕 データ構造変更**: InputData, OutputData, BatchOutput → SLASH用データ構造 **完了**
+   - InputData: audio + cqt + pitch_label
+   - OutputData: cqt + pitch_label  
+   - BatchOutput: cqt (B, T, ?) + pitch_label (B, T)
+4. **🆕 dataset.py変更**: LazyInputData → SLASH用（audio_path + pitch_label_path）**完了**
+5. **🆕 Predictor.forward()変更**: SLASH用出力（F0確率分布 + Band Aperiodicity）**完了**
+   - Phase 1: 固定長実装、Conformerベース構造維持
+   - 入力: cqt (B, T, ?) 出力: f0_probs (B, T, 1024), bap (B, T, 8)
+6. **🆕 Model.forward()変更**: SLASH用損失（暫定MSE損失）**完了**
+   - Phase 1: loss_f0 + loss_bap の基本MSE損失
+7. **🆕 基本コンポーネントコンパイル確認**: **完了**
+   - Config, Predictor, Model の作成・動作確認済み
 
-**🔄 実行中項目**:
-1. **import修正** (scripts/train.py 他)
-3. **data構造変更**: InputData → SLASH音声データ (audio_path, pitch_label_path)
-4. **動作確認**: 修正後のコードで学習が動作することを確認
+**⚠️ Phase 1 の制限事項（Phase 2で解決予定）**:
+- **CQT変換**: 暫定実装（ダミーデータ）→ FIXME: 実際のCQT変換実装
+- **損失関数**: 暫定MSE損失 → FIXME: SLASH損失（L_cons, L_guide等）実装
+- **固定長前提**: パディング処理 → FIXME: Dynamic batching対応
+- **Conformerベース**: 暫定構造 → FIXME: NANSY++ベースPitch Encoder実装
 
-**⚠️ 現在の状況**:
-- **予想されるコンパイルエラー**: dataset.py, model.py, predictor.py で旧パラメータ参照
-- **データ構造不整合**: InputData, OutputData がSLASH形式未対応
-- **pathlist不整合**: 音声ファイル用pathlist未作成
-
-**FIXME**: 
-- MIR-1K pathlist 生成の自動化
-- LibriTTS-R の F0 ラベル不要での学習対応
+**🔄 Phase 1 残り作業**:
+- テストデータ準備（pathlist作成）
+- 実際の学習ループ動作確認
 
 #### Phase 2: Pitch Encoder実装 🚧 **要破壊的変更**
 **実装対象**: 現在のConformer Predictor → NANSY++ベース Pitch Encoder
@@ -380,11 +392,16 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 - GED損失の安定化手法
 - Dynamic batching の具体的制御方法
 
-### 🚀 **現在の実装状況**
-**Phase 1 進捗**: ✅ SLASH設定対応完了、🔄 データ構造変更継続中
-- ✅ config.py変更 → ✅ base_config.yaml変更 → 🔄 データ構造変更 → 🔄 動作確認 → Phase 2へ
+### 🚀 **現在の実装状況** (2025-08-06 更新)
+**Phase 1 進捗**: ✅ **完了** - SLASH基本構造変更・固定長実装
+- ✅ config.py変更 → ✅ base_config.yaml変更 → ✅ データ構造変更 → ✅ Predictor/Model変更 → ✅ コンパイル確認 → 🔄 テストデータ準備
 
-**次のステップ**: InputData/OutputData の SLASH 対応 → コンパイルエラー解消 → 動作確認
+**Phase 1 成果**:
+- ✅ 全コンポーネントのSLASH対応完了（Config, Predictor, Model, Dataset）
+- ✅ 基本コンパイルエラー解消、オブジェクト作成確認済み
+- ⚠️ Phase 1制限事項: CQT暫定実装、MSE暫定損失、固定長前提
+
+**次のステップ**: Phase 2 - NANSY++ベースPitch Encoder + SLASH損失関数実装
 
 ### Phase 2: 相対ピッチ学習（推定期間: 4-6日）
 

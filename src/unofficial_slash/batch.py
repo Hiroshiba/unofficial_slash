@@ -12,17 +12,13 @@ from unofficial_slash.data.data import OutputData
 class BatchOutput:
     """バッチ処理後のデータ構造"""
 
-    feature_vector: Tensor  # (B, ?)
-    feature_variable_list: list[Tensor]  # [(L, ?)]
-    target_vector: Tensor  # (B, ?)
-    target_variable_list: list[Tensor]  # [(L, ?)]
-    target_scalar: Tensor  # (B,)
-    speaker_id: Tensor  # (B,)
+    cqt: Tensor  # (B, T, ?)
+    pitch_label: Tensor  # (B, T)
 
     @property
     def data_num(self) -> int:
         """バッチサイズを返す"""
-        return self.feature_vector.shape[0]
+        return self.cqt.shape[0]
 
 
 def collate_stack(values: list[Tensor]) -> Tensor:
@@ -31,15 +27,13 @@ def collate_stack(values: list[Tensor]) -> Tensor:
 
 
 def collate_dataset_output(data_list: list[OutputData]) -> BatchOutput:
-    """DatasetOutputのリストをBatchOutputに変換"""
+    """OutputDataのリストをBatchOutputに変換"""
+    # FIXME: Phase 2でDynamic batching対応時にpad_sequence()使用
+    # FIXME: Phase 2では attention_mask と実際の長さ情報も含める必要
     if len(data_list) == 0:
         raise ValueError("batch is empty")
 
     return BatchOutput(
-        feature_vector=collate_stack([d.feature_vector for d in data_list]),
-        feature_variable_list=[d.feature_variable for d in data_list],
-        target_vector=collate_stack([d.target_vector for d in data_list]),
-        target_variable_list=[d.target_variable for d in data_list],
-        target_scalar=collate_stack([d.target_scalar for d in data_list]),
-        speaker_id=collate_stack([d.speaker_id for d in data_list]),
+        cqt=collate_stack([d.cqt for d in data_list]),
+        pitch_label=collate_stack([d.pitch_label for d in data_list]),
     )

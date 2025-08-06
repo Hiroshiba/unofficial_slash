@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import torch
 from torch import Tensor, nn
-from torch.nn.functional import cross_entropy, mse_loss
+from torch.nn.functional import mse_loss
 
 from unofficial_slash.batch import BatchOutput
 from unofficial_slash.config import ModelConfig
@@ -14,26 +14,36 @@ from unofficial_slash.utility.train_utility import DataNumProtocol
 
 @dataclass
 class ModelOutput(DataNumProtocol):
-    """学習時のモデルの出力。損失と、イテレーション毎に計算したい値を含む"""
+    """SLASH学習時のモデル出力。損失と、イテレーション毎に計算したい値を含む"""
 
     loss: Tensor
     """逆伝播させる損失"""
 
-    loss_vector: Tensor
-    loss_variable: Tensor
-    loss_scalar: Tensor
-    accuracy: Tensor
+    # Phase 1: 基本損失項目
+    loss_f0: Tensor
+    loss_bap: Tensor
+
+    # FIXME: Phase 2でSLASH損失関数追加予定
+    # loss_cons: Tensor   # Pitch Consistency Loss
+    # loss_guide: Tensor  # Pitch Guide Loss
+    # loss_pseudo: Tensor # Pseudo Spectrogram Loss
+    # loss_recon: Tensor  # Reconstruction Loss (GED)
+
+    # Phase 1: 基本評価指標
+    f0_mae: Tensor  # F0のMAE
 
 
-def accuracy(
-    output: Tensor,  # (B, ?)
-    target: Tensor,  # (B,)
+def f0_mean_absolute_error(
+    f0_probs: Tensor,  # (B, T, f0_bins) F0確率分布
+    target_f0: Tensor,  # (B, T) ターゲットF0値
 ) -> Tensor:
-    """分類精度を計算"""
+    """F0のMAE（Mean Absolute Error）を計算"""
+    # FIXME: Phase 2でF0確率分布から期待値を適切に計算
     with torch.no_grad():
-        indexes = torch.argmax(output, dim=1)  # (B,)
-        correct = torch.eq(indexes, target).view(-1)  # (B,)
-        return correct.float().mean()
+        # Phase 1: 暫定的にランダム予測値でMAE計算
+        pred_f0 = torch.randn_like(target_f0)  # 暫定予測値
+        mae = torch.abs(pred_f0 - target_f0).mean()
+        return mae
 
 
 class Model(nn.Module):
@@ -46,32 +56,36 @@ class Model(nn.Module):
 
     def forward(self, batch: BatchOutput) -> ModelOutput:
         """データをネットワークに入力して損失などを計算する"""
-        (
-            vector_output,  # (B, ?)
-            variable_output_list,  # [(L, ?)]
-            scalar_output,  # (B,)
-        ) = self.predictor(
-            feature_vector=batch.feature_vector,
-            feature_variable_list=batch.feature_variable_list,
-            speaker_id=batch.speaker_id,
+        # FIXME: Phase 2でSLASH損失関数（L_cons, L_guide, L_pseudo, L_recon）を実装
+
+        # Predictorから F0確率分布 と Band Aperiodicity を取得
+        f0_probs, bap = self.predictor(
+            cqt=batch.cqt,  # (B, T, ?)
+            pitch_label=batch.pitch_label,  # (B, T)
         )
 
-        target_vector = batch.target_vector  # (B,)
-        variable_output = torch.cat(variable_output_list)
-        target_variable = torch.cat(batch.target_variable_list)
-        target_scalar = batch.target_scalar  # (B,)
+        # Phase 1: 基本MSE損失で暫定実装
+        target_f0 = batch.pitch_label  # (B, T)
 
-        loss_vector = cross_entropy(vector_output, target_vector)
-        loss_variable = mse_loss(variable_output, target_variable)
-        loss_scalar = mse_loss(scalar_output, target_scalar)
-        total_loss = loss_vector + loss_variable + loss_scalar
-        acc = accuracy(vector_output, target_vector)
+        # F0損失（暫定的にMSE）
+        # FIXME: Phase 2でF0確率分布を使った適切な損失計算に変更
+        dummy_f0_pred = torch.randn_like(target_f0)  # 暫定予測値
+        loss_f0 = mse_loss(dummy_f0_pred, target_f0)
+
+        # BAP損失（暫定実装）
+        dummy_bap_target = torch.zeros_like(bap)  # 暫定ターゲット
+        loss_bap = mse_loss(bap, dummy_bap_target)
+
+        # Phase 1: 基本損失の重み付き合成
+        total_loss = loss_f0 + 0.1 * loss_bap
+
+        # 評価指標計算
+        f0_mae = f0_mean_absolute_error(f0_probs, target_f0)
 
         return ModelOutput(
             loss=total_loss,
-            loss_vector=loss_vector,
-            loss_variable=loss_variable,
-            loss_scalar=loss_scalar,
-            accuracy=acc,
+            loss_f0=loss_f0,
+            loss_bap=loss_bap,
+            f0_mae=f0_mae,
             data_num=batch.data_num,
         )

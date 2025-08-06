@@ -8,34 +8,40 @@ from pathlib import Path
 from typing import assert_never
 
 import numpy
-from pydantic import TypeAdapter
+import torchaudio
 from torch.utils.data import Dataset as BaseDataset
 
 from unofficial_slash.config import DataFileConfig, DatasetConfig
 from unofficial_slash.data.data import InputData, OutputData, preprocess
-from unofficial_slash.data.sampling_data import SamplingData
 
 
 @dataclass
 class LazyInputData:
     """遅延読み込み対応の入力データ構造"""
 
-    feature_vector_path: Path
-    feature_variable_path: Path
-    target_vector_path: Path
-    target_variable_path: Path
-    target_scalar_path: Path
-    speaker_id: int
+    audio_path: Path
+    pitch_label_path: Path | None
 
     def generate(self) -> InputData:
         """ファイルからデータを読み込んでInputDataを生成"""
+        # FIXME: Phase 1では暫定実装、Phase 2でCQT変換と音声読み込みを実装
+
+        # 音声ファイル読み込み
+        audio, sr = torchaudio.load(self.audio_path)
+
+        # ピッチラベル読み込み（オプション）
+        pitch_data = None
+        if self.pitch_label_path is not None:
+            pitch_data = numpy.loadtxt(self.pitch_label_path)
+
+        # 暫定的にダミーデータを作成（Phase 2で適切な実装に変更）
+        dummy_cqt = numpy.random.randn(100, 176).astype(numpy.float32)  # (T, CQT_bins)
+        dummy_f0 = numpy.random.randn(100).astype(numpy.float32)  # (T,)
+
         return InputData(
-            feature_vector=numpy.load(self.feature_vector_path, allow_pickle=True),
-            feature_variable=numpy.load(self.feature_variable_path, allow_pickle=True),
-            target_vector=SamplingData.load(self.target_vector_path),
-            target_variable=SamplingData.load(self.target_variable_path),
-            target_scalar=float(numpy.load(self.target_scalar_path, allow_pickle=True)),
-            speaker_id=self.speaker_id,
+            audio=audio.squeeze(0).numpy(),  # (T,)
+            cqt=dummy_cqt,  # (T, 176)
+            pitch_label=pitch_data if pitch_data is not None else dummy_f0,
         )
 
 
@@ -155,43 +161,24 @@ def get_data_paths(
 
 def get_datas(config: DataFileConfig) -> list[LazyInputData]:
     """データを取得"""
-    (
-        fn_list,
-        (
-            feature_vector_pathmappings,
-            feature_variable_pathmappings,
-            target_vector_pathmappings,
-            target_variable_pathmappings,
-            target_scalar_pathmappings,
-        ),
-    ) = get_data_paths(
-        config.root_dir,
-        [
-            config.feature_vector_pathlist_path,
-            config.feature_variable_pathlist_path,
-            config.target_vector_pathlist_path,
-            config.target_variable_pathlist_path,
-            config.target_scalar_pathlist_path,
-        ],
-    )
+    # 必須のaudio pathlistを取得
+    pathlist_paths = [config.audio_pathlist_path]
 
-    fn_each_speaker = TypeAdapter(dict[str, list[str]]).validate_json(
-        config.speaker_dict_path.read_text()
-    )
-    speaker_ids = {
-        fn: speaker_id
-        for speaker_id, fns in enumerate(fn_each_speaker.values())
-        for fn in fns
-    }
+    # オプションのpitch label pathlistを追加
+    if config.pitch_label_pathlist_path is not None:
+        pathlist_paths.append(config.pitch_label_pathlist_path)
+
+    fn_list, path_mappings = get_data_paths(config.root_dir, pathlist_paths)
+
+    audio_paths = path_mappings[0]  # audio pathlist
+    pitch_paths = (
+        path_mappings[1] if len(path_mappings) > 1 else {}
+    )  # pitch pathlist（オプション）
 
     datas = [
         LazyInputData(
-            feature_vector_path=feature_vector_pathmappings[fn],
-            feature_variable_path=feature_variable_pathmappings[fn],
-            target_vector_path=target_vector_pathmappings[fn],
-            target_variable_path=target_variable_pathmappings[fn],
-            target_scalar_path=target_scalar_pathmappings[fn],
-            speaker_id=speaker_ids[fn],
+            audio_path=audio_paths[fn],
+            pitch_label_path=pitch_paths.get(fn),  # Noneの場合もある
         )
         for fn in fn_list
     ]

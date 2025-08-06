@@ -7,7 +7,7 @@ from typing import Any
 
 import yaml
 
-from hiho_pytorch_base.dataset import DatasetType
+from unofficial_slash.dataset import DatasetType
 
 
 def _str_represent(dumper, data):

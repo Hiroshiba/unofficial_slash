@@ -2,7 +2,6 @@
 
 import torch
 from torch import Tensor, nn
-from torch.nn.utils.rnn import pad_sequence
 
 from unofficial_slash.config import NetworkConfig
 from unofficial_slash.network.conformer.encoder import Encoder
@@ -38,73 +37,57 @@ class Predictor(nn.Module):
     def forward(  # noqa: D102
         self,
         *,
-        feature_vector: Tensor,  # (B, ?)
-        feature_variable_list: list[Tensor],  # [(vL, ?)]
-        speaker_id: Tensor,  # (B,)
-    ) -> tuple[Tensor, list[Tensor], Tensor]:  # (B, ?), [(vL, ?)], (B,)
-        device = feature_vector.device
-        batch_size = feature_vector.size(0)
+        cqt: Tensor,  # (B, T, ?) CQT特徴量
+        pitch_label: Tensor | None = None,  # (B, T) ピッチラベル（学習時のみ）
+    ) -> tuple[Tensor, Tensor]:  # F0確率分布 (B, T, 1024), Band Aperiodicity (B, T, 8)
+        # FIXME: Phase 1の暫定実装、Phase 2でSLASH Pitch Encoderに完全移行
+        # FIXME: Phase 2でDynamic batching対応（可変長シーケンス処理）
+        device = cqt.device
+        batch_size, seq_length, cqt_dim = cqt.shape
 
-        lengths = torch.tensor(
-            [var_data.shape[0] for var_data in feature_variable_list], device=device
-        )
+        # Phase 1: ダミーの話者埋め込み（SLASHでは使用しないが、Conformer構造のため必要）
+        dummy_speaker_id = torch.zeros(batch_size, dtype=torch.long, device=device)
+        speaker_embedding = self.speaker_embedder(dummy_speaker_id)  # (B, speaker_embedding_size)
 
-        if batch_size == 1:
-            # NOTE: ONNX化の際にpad_sequenceがエラーになるため迂回
-            padded_variable = feature_variable_list[0].unsqueeze(0)  # (1, L, ?)
-        else:
-            padded_variable = pad_sequence(
-                feature_variable_list, batch_first=True
-            )  # (B, L, ?)
-
-        speaker_embedding = self.speaker_embedder(speaker_id)  # (B, ?)
-
-        max_length = padded_variable.size(1)
+        # 話者埋め込みを時系列に拡張
         speaker_expanded = speaker_embedding.unsqueeze(1).expand(
-            batch_size, max_length, -1
-        )  # (B, L, ?)
+            batch_size, seq_length, -1
+        )  # (B, T, speaker_embedding_size)
 
-        combined_variable = torch.cat(
-            [padded_variable, speaker_expanded], dim=2
-        )  # (B, L, ?)
+        # CQTと話者埋め込みを結合
+        combined_input = torch.cat([cqt, speaker_expanded], dim=2)  # (B, T, cqt_dim + speaker_embedding_size)
 
-        h = self.pre_conformer(combined_variable)  # (B, L, ?)
+        # Conformer前処理
+        h = self.pre_conformer(combined_input)  # (B, T, hidden_size)
 
-        mask = make_non_pad_mask(lengths).unsqueeze(-2).to(device)  # (B, 1, L)
+        # Phase 1: 全フレームが有効と仮定（固定長パディング済み）
+        # FIXME: Phase 2では実際の音声長を使用し、attention_maskを適用
+        lengths = torch.full((batch_size,), seq_length, device=device)
+        mask = make_non_pad_mask(lengths).unsqueeze(-2).to(device)  # (B, 1, T)
 
-        encoded, _ = self.encoder(x=h, cond=None, mask=mask)  # (B, L, ?)
+        # Conformer エンコーダ
+        encoded, _ = self.encoder(x=h, cond=None, mask=mask)  # (B, T, hidden_size)
 
-        variable_features = self.variable_head(encoded)  # (B, L, ?)
+        # Phase 1: F0確率分布とBand Aperiodicityを出力
+        # FIXME: Phase 2でNANSY++ベースのPitch Encoderアーキテクチャに変更
+        f0_probs = self.variable_head(encoded)  # (B, T, f0_bins) → F0確率分布
+        bap = torch.zeros(batch_size, seq_length, 8, device=device)  # (B, T, 8) → 暫定BAP
 
-        mask_expanded = mask.squeeze(-2).unsqueeze(-1)  # (B, L, 1)
-        masked_encoded = encoded * mask_expanded  # (B, L, ?)
-        variable_sum = masked_encoded.sum(dim=1)  # (B, ?)
-        variable_mean = variable_sum / lengths.unsqueeze(-1).float()  # (B, ?)
-
-        fixed_features = self.feature_vector_processor(feature_vector)  # (B, ?)
-
-        final_features = torch.cat([fixed_features, variable_mean], dim=1)  # (B, ?)
-
-        vector_output = self.vector_head(final_features)  # (B, ?)
-        scalar_output = self.scalar_head(final_features).squeeze(-1)  # (B,)
-
-        variable_output_list = [
-            variable_features[i, :length] for i, length in enumerate(lengths)
-        ]
-
-        return vector_output, variable_output_list, scalar_output
+        return f0_probs, bap
 
 
 def create_predictor(config: NetworkConfig) -> Predictor:
     """設定からPredictorを作成"""
+    # FIXME: Phase 2でSLASH Pitch Encoderに変更予定
+    dropout_rate = 0.1  # デフォルト値
     encoder = Encoder(
         hidden_size=config.hidden_size,
         condition_size=0,
-        block_num=config.conformer_block_num,
-        dropout_rate=config.conformer_dropout_rate,
-        positional_dropout_rate=config.conformer_dropout_rate,
+        block_num=config.encoder_layers,
+        dropout_rate=dropout_rate,
+        positional_dropout_rate=dropout_rate,
         attention_head_size=8,
-        attention_dropout_rate=config.conformer_dropout_rate,
+        attention_dropout_rate=dropout_rate,
         use_macaron_style=True,
         use_conv_glu_module=True,
         conv_glu_module_kernel_size=31,
@@ -112,11 +95,11 @@ def create_predictor(config: NetworkConfig) -> Predictor:
         feed_forward_kernel_size=3,
     )
     return Predictor(
-        feature_vector_size=config.feature_vector_size,
-        feature_variable_size=config.feature_variable_size,
+        feature_vector_size=config.cqt_bins,  # CQT出力を使用
+        feature_variable_size=config.cqt_bins,  # 暫定的にCQTサイズ
         hidden_size=config.hidden_size,
-        target_vector_size=config.target_vector_size,
-        speaker_size=config.speaker_size,
-        speaker_embedding_size=config.speaker_embedding_size,
+        target_vector_size=config.f0_bins,  # F0確率分布サイズ
+        speaker_size=1,  # SLASHでは話者情報なし（暫定1）
+        speaker_embedding_size=32,  # 暫定値
         encoder=encoder,
     )
