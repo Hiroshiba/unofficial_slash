@@ -38,6 +38,11 @@ network:
   pitch_guide_f_min: 20.0
   pitch_guide_f_max: 2000.0
   pitch_guide_n_fft: 1024
+  
+  # Pseudo Spectrogram Generator 設定
+  pseudo_spec_epsilon: 0.001
+  pseudo_spec_n_fft: 1024
+  pseudo_spec_hop_length: 120
 
 model:
   # 損失重み

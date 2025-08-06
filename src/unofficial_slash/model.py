@@ -8,6 +8,7 @@ from torch.nn.functional import huber_loss
 
 from unofficial_slash.batch import BatchOutput
 from unofficial_slash.config import ModelConfig
+from unofficial_slash.network.dsp.fine_structure import fine_structure_spectrum
 from unofficial_slash.network.predictor import Predictor
 from unofficial_slash.utility.train_utility import DataNumProtocol
 
@@ -24,8 +25,10 @@ class ModelOutput(DataNumProtocol):
     loss_bap: Tensor  # Band Aperiodicity Loss (暫定MSE)
     loss_guide: Tensor  # Pitch Guide Loss (L_guide)
 
-    # Phase 4以降で追加予定:
-    # loss_pseudo: Tensor # Pseudo Spectrogram Loss (L_pseudo)
+    # Phase 4a: Pseudo Spectrogram Loss追加
+    loss_pseudo: Tensor  # Pseudo Spectrogram Loss (L_pseudo)
+
+    # Phase 4b以降で追加予定:
     # loss_recon: Tensor  # Reconstruction Loss (L_recon, GED)
 
     # 評価指標
@@ -69,14 +72,56 @@ def pitch_guide_loss(
 
     L_g = (1/T) * Σ_t max(1 - Σ_f P_{t,f} * G_{t,f} - m, 0)
     """
+    # F0確率分布をsoftmaxで正規化（論文の確率分布Pとして扱う）
+    normalized_probs = F.softmax(f0_probs, dim=-1)  # (B, T, F)
+
     # P と G の内積を計算（各フレームごと）
-    inner_product = torch.sum(f0_probs * pitch_guide, dim=-1)  # (B, T)
+    inner_product = torch.sum(normalized_probs * pitch_guide, dim=-1)  # (B, T)
 
     # ヒンジ損失: max(1 - inner_product - margin, 0)
     hinge_loss = torch.clamp(1.0 - inner_product - hinge_margin, min=0.0)
 
     # 時間軸での平均
     loss = torch.mean(hinge_loss)
+
+    return loss
+
+
+def pseudo_spectrogram_loss(
+    pseudo_spectrogram: Tensor,  # (B, T, K) Pseudo Spectrogram S*
+    target_spectrogram: Tensor,  # (B, T, K) Target Spectrogram S
+    vuv_mask: Tensor,  # (B, T) V/UV mask (1: voiced, 0: unvoiced)
+    window_size: int,  # Fine structure spectrum用の窓サイズ
+) -> Tensor:
+    """
+    Pseudo Spectrogram Loss (L_pseudo) - SLASH論文 Equation (6)
+
+    L_pseudo = ||ψ(S*) - ψ(S)||₁ ⊙ (v × 1_K)
+
+    Args:
+        pseudo_spectrogram: 生成されたPseudo Spectrogram S* (B, T, K)
+        target_spectrogram: ターゲットSpectrogram S (B, T, K)
+        vuv_mask: 有声/無声マスク v (B, T)
+        window_size: Fine structure spectrum計算用の窓サイズ
+
+    Returns:
+        L_pseudo損失
+    """
+    # Fine structure spectrum計算: ψ(S*) と ψ(S)
+    psi_pseudo = fine_structure_spectrum(pseudo_spectrogram, window_size)  # (B, T, K)
+    psi_target = fine_structure_spectrum(target_spectrogram, window_size)  # (B, T, K)
+
+    # L1ノルム: ||ψ(S*) - ψ(S)||₁
+    l1_diff = torch.abs(psi_pseudo - psi_target)  # (B, T, K)
+
+    # V/UVマスクを周波数次元に拡張: (B, T) -> (B, T, K)
+    vuv_mask_expanded = vuv_mask.unsqueeze(-1).expand_as(l1_diff)  # (B, T, K)
+
+    # マスクを適用: v × 1_K でのアダマール積
+    masked_loss = l1_diff * vuv_mask_expanded  # (B, T, K)
+
+    # 全体の平均
+    loss = torch.mean(masked_loss)
 
     return loss
 
@@ -110,11 +155,6 @@ class Model(nn.Module):
         target_f0 = batch.pitch_label  # (B, T)
 
         # ピッチシフトがある場合（学習時）とない場合（評価時）で分岐
-        # FIXME: 学習時でもshift=0の場合があり、その場合は評価処理になってしまう
-        # 一貫性のため、学習時は常にforward_with_shift()を使用する方が良いかもしれない
-        # FIXME: この分岐条件が脆弱で、バッチ内の一部でもshift≠0があると学習扱いになる
-        # より明示的なtraining/evaluation mode flag が必要
-        # NOTE: そもそもmodel.pyは評価時に来ないはず、train.pyを参照
         if torch.any(batch.pitch_shift_semitones != 0):
             # 学習時: ピッチシフトありの場合
             # forward_with_shift()を使用して一括処理
@@ -122,9 +162,9 @@ class Model(nn.Module):
                 f0_probs,  # (B, T, ?)
                 f0_values,  # (B, T)
                 bap,  # (B, T, ?)
-                f0_probs_shifted,  # (B, T, ?) - FIXME: 未使用変数、将来のF0確率分布ベース損失用
+                _,  # f0_probs_shifted - Phase 4b以降で使用予定
                 f0_values_shifted,  # (B, T)
-                bap_shifted,  # (B, T, ?) - FIXME: 未使用変数、将来のBAP関連損失用
+                _,  # bap_shifted - Phase 4b以降で使用予定
             ) = self.predictor.forward_with_shift(
                 batch.audio, batch.pitch_shift_semitones
             )
@@ -162,11 +202,47 @@ class Model(nn.Module):
         )
         loss_bap = huber_loss(bap, bap_target)
 
-        # SLASH損失の重み付き合成（論文の重みを使用）
+        # Pseudo Spectrogram Loss (L_pseudo) 計算
+        device = batch.audio.device
+        
+        # STFTでターゲットスペクトログラムを計算
+        # FIXME: STFTとCQTの時間軸不整合問題 - hop_lengthが異なる場合の時間軸対応が不完全
+        # CQT(B,F,T)とSTFT(B,T,F)の次元順序が混在し、フレーム数が一致しない可能性
+        n_fft = self.predictor.pseudo_spec_generator.n_freq_bins * 2 - 2
+        hop_length = self.predictor.cqt_transform.hop_length
+        
+        stft_result = torch.stft(
+            batch.audio,
+            n_fft=n_fft,
+            hop_length=hop_length,
+            window=torch.hann_window(n_fft, device=device),
+            return_complex=True,
+        )
+        target_spectrogram = torch.abs(stft_result).transpose(-1, -2)  # (B, T, K)
+        
+        # F0値のみ勾配を残してPseudo Spectrogram生成
+        f0_for_pseudo = f0_values  # F0勾配最適化用
+        
+        # Pseudo Spectrogram生成
+        pseudo_spectrogram = self.predictor.pseudo_spec_generator(f0_for_pseudo)
+        
+        # V/UVマスク作成（F0 > 0の部分が有声音）
+        vuv_mask = target_f0 > 0  # (B, T)
+        
+        # L_pseudo損失計算
+        loss_pseudo = pseudo_spectrogram_loss(
+            pseudo_spectrogram=pseudo_spectrogram,
+            target_spectrogram=target_spectrogram,
+            vuv_mask=vuv_mask,
+            window_size=self.predictor.pitch_guide_generator.window_size,
+        )
+
+        # SLASH損失の重み付き合成（L_pseudo追加）
         total_loss = (
             self.model_config.w_cons * loss_cons
             + self.model_config.w_bap * loss_bap
             + self.model_config.w_guide * loss_guide
+            + self.model_config.w_pseudo * loss_pseudo
         )
 
         # 評価指標計算
@@ -177,6 +253,7 @@ class Model(nn.Module):
             loss_cons=loss_cons,
             loss_bap=loss_bap,
             loss_guide=loss_guide,
+            loss_pseudo=loss_pseudo,
             f0_mae=f0_mae,
             data_num=batch.data_num,
         )

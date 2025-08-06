@@ -56,6 +56,11 @@ class NetworkConfig(BaseModel):
     pitch_guide_f_max: float
     pitch_guide_n_fft: int
 
+    # Pseudo Spectrogram Generator 設定
+    pseudo_spec_epsilon: float
+    pseudo_spec_n_fft: int
+    pseudo_spec_hop_length: int
+
 
 class ModelConfig(BaseModel):
     """SLASH 損失関数の設定"""

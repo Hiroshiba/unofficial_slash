@@ -10,6 +10,7 @@ from torch.nn import functional as F
 from unofficial_slash.config import NetworkConfig
 from unofficial_slash.network.conformer.encoder import Encoder
 from unofficial_slash.network.dsp.pitch_guide import PitchGuideGenerator
+from unofficial_slash.network.dsp.pseudo_spec import PseudoSpectrogramGenerator
 from unofficial_slash.network.transformer.utility import make_non_pad_mask
 
 
@@ -110,6 +111,13 @@ class Predictor(nn.Module):
             f_min=network_config.pitch_guide_f_min,
             f_max=network_config.pitch_guide_f_max,
             n_pitch_bins=network_config.f0_bins,
+        )
+
+        # Pseudo Spectrogram Generator初期化
+        self.pseudo_spec_generator = PseudoSpectrogramGenerator(
+            sample_rate=sample_rate,
+            n_freq_bins=network_config.pseudo_spec_n_fft // 2 + 1,  # STFTの周波数ビン数
+            epsilon=network_config.pseudo_spec_epsilon,
         )
 
         self.speaker_embedder = nn.Embedding(speaker_size, speaker_embedding_size)

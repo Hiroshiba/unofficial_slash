@@ -90,6 +90,8 @@ def fine_structure_spectrum(
         Fine structure spectrum ψ(S) (B, T, K)
     """
     # 小さな値を加算してlog(0)を回避
+    # FIXME: 数値安定性の強化が必要 - より堅牢なNaN/Inf検出と処理
+    # 現在のeps=1e-8では極小値での精度問題や、入力に既にNaN/Infが含まれる場合の対処が不十分
     eps = 1e-8
     log_spec = torch.log(amplitude_spectrogram + eps)
 

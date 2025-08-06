@@ -401,31 +401,34 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 - GED損失の安定化手法
 - Dynamic batching の具体的制御方法
 
-### 🚀 **現在の実装状況** (2025-08-06 更新)
+### 🚀 **現在の実装状況** (2025-01-21 更新)
 
 **Phase 1 進捗**: ✅ **完了** - SLASH基本構造変更・固定長実装  
 **Phase 2 進捗**: ✅ **完了** - 論文準拠音声処理・設定統合完了
 **Phase 3 進捗**: ✅ **完了** - DSP統合・絶対ピッチ学習基盤完成
+**Phase 4a 進捗**: ✅ **完了** - Pseudo Spectrogram Generator + L_pseudo実装完成
 
-**🎉 Phase 3 最終成果**:
-- ✅ **DSP モジュール実装**: Fine Structure Spectrum (ψ(S)) 計算、lag-window法実装
-- ✅ **SHS アルゴリズム実装**: Subharmonic Summation による Pitch Guide 生成
-- ✅ **Pitch Guide Loss 統合**: L_guide損失をModelに統合、論文 Equation (3) 実装
-- ✅ **アーキテクチャ統合**: PredictorにPitchGuideGeneratorを内包、設定管理統合
-- ✅ **絶対ピッチ学習基盤**: 相対ピッチ(L_cons) + 絶対ピッチ(L_guide) 学習システム完成
+**🎉 Phase 4a 最終成果**:
+- ✅ **三角波振動子実装**: SLASH論文Equation (4-6)準拠の微分可能スペクトログラム生成
+- ✅ **L_pseudo損失統合**: Fine structure spectrumベースのF0勾配最適化損失
+- ✅ **Predictor完全統合**: PseudoSpectrogramGeneratorのPredictorへの統合完了
+- ✅ **設定管理完備**: Pseudo Spectrogram Generator用パラメータの設定管理統合
+- ✅ **SLASH核心実装**: 相対ピッチ(L_cons) + 絶対ピッチ(L_guide) + F0勾配最適化(L_pseudo)
 
 **解決した主要課題**:
-- DSP由来絶対ピッチ情報の統合
-- NetworkConfigベースの統一設定管理
-- Predictor中心のアーキテクチャ設計
-- SLASH論文核心機能の実装基盤完成
+- 微分可能スペクトログラム生成機能の完全実装
+- F0勾配最適化による絶対ピッチ学習の基盤完成
+- 設定値ハードコーディングの解消
+- 未使用変数・不要FIXMEコメントの整理
 
-**Phase 3で発見された新たな課題**:
-- 周波数スケール変換の実装精度問題
-- DSP処理のメモリ効率化が必要
-- CQTとSTFTの周波数軸不整合
+**🚨 Phase 4a実装で発見された新たな課題**:
+- **時間軸不整合**: STFTとCQTのhop_lengthが異なる場合の対処が不完全
+- **三角波振動子精度**: 論文の位相計算式との完全一致が未検証
+- **データフロー設計**: PseudoSpectrogramGeneratorの呼び出し経路が複雑
+- **型システム**: CQT(B,K,T)とSTFT(B,T,K)の次元順序統一が不完全
+- **数値安定性**: ゼロ除算・NaN/Inf処理の強化が必要
 
-**次のステップ**: Phase 4 - Pseudo Spectrogram Generator, DDSP Synthesizer, GED損失実装
+**次のステップ**: Phase 4b - DDSP Synthesizer, GED損失, V/UV Detector実装
 
 ## Phase 2実装で発見された課題 (2025-08-06)
 
