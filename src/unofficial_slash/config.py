@@ -9,46 +9,60 @@ from unofficial_slash.utility.git_utility import get_branch_name, get_commit_id
 
 
 class DataFileConfig(BaseModel):
-    """データファイルの設定"""
+    """SLASH 音声データファイルの設定"""
 
-    feature_vector_pathlist_path: Path
-    feature_variable_pathlist_path: Path
-    target_vector_pathlist_path: Path
-    target_variable_pathlist_path: Path
-    target_scalar_pathlist_path: Path
-    speaker_dict_path: Path
+    audio_pathlist_path: Path
+    pitch_label_pathlist_path: Path | None
     root_dir: Path | None
 
 
 class DatasetConfig(BaseModel):
-    """データセット全体の設定"""
+    """SLASH データセット全体の設定"""
 
     train: DataFileConfig
     valid: DataFileConfig | None = None
     test_num: int
     eval_times_num: int = 1
     seed: int = 0
+    sample_rate: int
     frame_rate: float
     frame_length: int
 
 
 class NetworkConfig(BaseModel):
-    """ニューラルネットワークの設定"""
+    """SLASH Pitch Encoder ネットワークの設定"""
 
-    feature_vector_size: int
-    feature_variable_size: int
+    # CQT 設定
+    cqt_bins: int
+    cqt_total_bins: int
+    cqt_hop_length: int
+    cqt_bins_per_octave: int
+    cqt_fmin: float
+    cqt_filter_scale: float
+    
+    # Pitch Encoder 設定
+    f0_bins: int
+    bap_bins: int
     hidden_size: int
-    target_vector_size: int
-    conformer_block_num: int
-    conformer_dropout_rate: float
-    speaker_size: int
-    speaker_embedding_size: int
+    encoder_layers: int
 
 
 class ModelConfig(BaseModel):
-    """モデルの設定"""
+    """SLASH 損失関数の設定"""
 
-    pass
+    # 損失重み
+    w_cons: float
+    w_guide: float
+    w_pseudo: float
+    w_recon: float
+    w_aug: float
+    
+    # 損失パラメータ
+    hinge_margin: float
+    ged_alpha: float
+    vuv_threshold: float
+    epsilon: float
+    pitch_shift_range: int
 
 
 class TrainConfig(BaseModel):

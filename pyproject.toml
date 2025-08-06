@@ -50,7 +50,7 @@ unfixable = [
 "test/**/test_*.py" = ["D103"] # undocumented-public-function。pytest の対象 test_*() が D103 の対象になり、関数名から内容が自明でも docstring を強制されるため。
 
 [tool.ruff.lint.isort]
-known-first-party = ["hiho_pytorch_base"]
+known-first-party = ["unofficial_slash"]
 known-third-party = ["numpy", "torch"]
 
 [tool.ruff.lint.pydocstyle]

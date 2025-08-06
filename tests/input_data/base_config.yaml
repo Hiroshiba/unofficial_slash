@@ -1,0 +1,65 @@
+dataset:
+  train:
+    audio_pathlist_path: "tests/data/test_data/train_audio_pathlist.txt"
+    pitch_label_pathlist_path: "tests/data/test_data/train_pitch_pathlist.txt"
+    root_dir: "tests/data/test_data"
+  valid:
+    audio_pathlist_path: "tests/data/test_data/valid_audio_pathlist.txt"
+    pitch_label_pathlist_path: "tests/data/test_data/valid_pitch_pathlist.txt"
+    root_dir: "tests/data/test_data"
+  test_num: 16
+  eval_times_num: 1
+  seed: 42
+  sample_rate: 24000
+  frame_rate: 200.0
+  frame_length: 480
+
+network:
+  # CQT 設定
+  cqt_bins: 176
+  cqt_total_bins: 205
+  cqt_hop_length: 120
+  cqt_bins_per_octave: 24
+  cqt_fmin: 32.70
+  cqt_filter_scale: 0.5
+  
+  # Pitch Encoder 設定
+  f0_bins: 1024
+  bap_bins: 8
+  hidden_size: 512
+  encoder_layers: 6
+
+model:
+  # 損失重み
+  w_cons: 10.0
+  w_guide: 1.0
+  w_pseudo: 10.0
+  w_recon: 5.0
+  w_aug: 1.0
+  
+  # 損失パラメータ
+  hinge_margin: 0.5
+  ged_alpha: 0.1
+  vuv_threshold: 0.5
+  epsilon: 0.001
+  pitch_shift_range: 14
+
+train:
+  batch_size: 17
+  eval_batch_size: 17
+  log_epoch: 1
+  eval_epoch: 2
+  snapshot_epoch: 4
+  stop_epoch: 1000
+  model_save_num: 2
+  optimizer:
+    name: "adamw"
+    lr: 0.0002
+  scheduler: { "name": "warmup", "warmup_steps": 10 }
+  num_processes: 0
+  use_gpu: false
+  use_amp: false
+
+project:
+  name: "slash_test"
+  category: "speech-processing"

@@ -82,39 +82,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Dynamic batching の実装詳細
 - 時間領域波形生成の最小位相応答計算
 
-## 設定管理（argparse）
+## 設定管理（Pydantic + YAML）
 
-必須パラメータの初期値:
-```python
-# Data
---data_root: データセットルートパス
---dataset: "libritts-r"（学習用） or "mir-1k"（評価用）
---sample_rate: 24000
+**現在の設定システム**: Pydantic BaseModel + YAML 設定ファイル
 
-# Model  
---f_bins: 1024  # F0 probability bins
---bap_dim: 8    # Band aperiodicity dimension
---cqt_bins: 205 # CQT frequency bins
---cqt_hop: 120  # 5ms at 24kHz
+SLASH用の設定構造については以下を参照：
+- **設定クラス定義**: `src/unofficial_slash/config.py`
+- **実際の設定例**: `tests/input_data/base_config.yaml`
 
-# Training
---batch_size: 17
---learning_rate: 0.0002
---max_steps: 100000
---shift_range: 14  # ±14 bins for pitch shift
-
-# Loss weights
---w_cons: 10.0
---w_pseudo: 10.0  
---w_recon: 5.0
---w_guide: 1.0
-
-# DSP parameters
---hinge_margin: 0.5    # m in pitch guide loss
---ged_alpha: 0.1       # α in GED loss
---vuv_threshold: 0.5   # θ for V/UV detection
---epsilon: 0.001       # ε for pseudo spec generation
-```
+現在の汎用ML設定をSLASH専用（CQT、F0推定、SLASH損失関数）に破壊的変更予定。
 
 ## 参考論文（実装必須）
 
@@ -290,94 +266,125 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 - log-F0 RMSE: 対数 F0 の RMSE
 - V/UV Error Rate: 有声/無声分類エラー率
 
-## 実装優先順位
+## 実装優先順位 (**現在**: 汎用MLフレームワーク → SLASH専用に破壊的変更)
 
-1. **Phase 1**: 基本構造構築
-   - データローダー（dataset.py）
-   - Pitch Encoder（network.py）
-   - CQT Analyzer, DSP モジュール骨格
+### 🎯 **現在の状況**:
+- ✅ **基本構造完了**: src/, scripts/, tests/, pathlistシステム、Pydantic設定
+- ✅ **学習システム完了**: train.py, model.py, predictor.py (Conformer)
+- ✅ **データ処理部分完了**: dataset.py, CQT変換, MIR-1K対応
 
-2. **Phase 2**: 相対ピッチ学習
-   - L_cons 損失実装
-   - ピッチシフト処理
-   - 基本学習ループ（train.py）
+### 🔄 **SLASH実装フェーズ** (破壊的変更による段階的移行):
 
-3. **Phase 3**: 絶対ピッチ統合
-   - Pitch Guide Generator (SHS)
-   - L_g 損失実装
-   - Pseudo Spectrogram Generator
-   - L_pseudo 損失実装
+**Phase 1: 基本修正・SLASH設定対応** (1-2日)
+2. **設定変更**: config.py を SLASH 用パラメータに変更
+3. **データ構造変更**: InputData, OutputData を SLASH 用に変更
+4. **動作確認**: 現在の学習ループが SLASH 設定で動作することを確認
 
-4. **Phase 4**: 完全統合
-   - DDSP Synthesizer
-   - L_recon (GED) 損失
-   - V/UV Detector
-   - ノイズロバスト化
+**Phase 2: Pitch Encoder実装** (3-5日) 
+1. **Predictor変更**: Conformer → NANSY++ベース Pitch Encoder に破壊的変更
+2. **CQT統合**: 現在の CQT 実装を Predictor に統合
+3. **損失変更**: model.py の汎用損失 → L_cons (Pitch Consistency Loss)
+4. **ピッチシフト**: CQT空間でのピッチシフト処理実装
 
-## 詳細実装計画
+**Phase 3: DSPモジュール統合** (4-6日)
+1. **dsp/モジュール**: Pitch Guide Generator (SHS) 実装
+2. **損失拡張**: L_guide, L_pseudo 損失追加  
+3. **Pseudo Spectrogram**: 微分可能スペクトログラム生成
+4. **統合テスト**: Phase 2 + Phase 3 の結合動作確認
 
-- ⬜ 実装Phase 1開始（基本構造構築）
+**Phase 4: 完全統合・最適化** (5-7日)
+1. **DDSP Synthesizer**: 微分可能音声合成器
+2. **GED損失**: L_recon (Generalized Energy Distance) 実装
+3. **V/UV Detector**: 有声/無声判定器
+4. **ノイズロバスト化**: データ拡張と追加損失
+5. **性能最適化**: Dynamic batching, メモリ効率化
 
-### Phase 1: 基本構造構築（推定期間: 3-5日）
+## 現在の実装状況と次期計画
 
-#### 1.1 プロジェクト骨格の作成
-**実装対象**: 基本ディレクトリ構造、依存関係管理
-**参考資料**: なし（標準的な Python プロジェクト構造）
+### ✅ **完了済み**: 基本MLフレームワーク + SLASH設定対応
+1. **プロジェクト構造**: src/unofficial_slash/, scripts/, tests/ 完成
+2. **依存関係管理**: pyproject.toml, uv による管理完成 
+3. **設定システム**: Pydantic + YAML による型安全設定完成
+4. **学習システム**: エポックベース学習ループ、AMP、スナップショット完成
+5. **データシステム**: pathlist, 遅延読み込み, train/test/eval/valid 分割完成
+6. **ネットワーク**: Conformer ベース Predictor, マルチタスク出力完成
+7. **基本CQT**: torchaudio による CQT 変換 (data.py) 完成
+8. **MIR-1K対応**: ピッチラベル読み込み、ステレオ分離完成
+9. **🆕 SLASH設定構造**: config.py → CQT/Pitch Encoder/損失関数パラメータ完成
+10. **🆕 SLASH設定ファイル**: base_config.yaml → SLASH用設定完成
+
+### 🎯 **次期実装計画**: SLASH専用化 (破壊的変更)
+
+#### Phase 1: 基本修正・SLASH設定移行 ⚡ **一部完了・継続中**
+**実装対象**: 現在のサンプルコードをSLASH用に適応
+
+**✅ 完了項目**:
+2. **config.py変更**: NetworkConfig → SLASH用パラメータ (cqt_bins, f0_bins等) **完了**
+   - DataFileConfig → audio_pathlist + pitch_label_pathlist (optional)
+   - NetworkConfig → CQT設定 + Pitch Encoder設定
+   - ModelConfig → SLASH損失関数パラメータ
+3. **base_config.yaml変更**: SLASH用設定ファイル **完了**
+   - CQT: 176 bins, 205 total, 32.70Hz, 24kHz
+   - F0: 1024 bins, BAP: 8 bins, AdamW 0.0002
+
+**🔄 実行中項目**:
+1. **import修正** (scripts/train.py 他)
+3. **data構造変更**: InputData → SLASH音声データ (audio_path, pitch_label_path)
+4. **動作確認**: 修正後のコードで学習が動作することを確認
+
+**⚠️ 現在の状況**:
+- **予想されるコンパイルエラー**: dataset.py, model.py, predictor.py で旧パラメータ参照
+- **データ構造不整合**: InputData, OutputData がSLASH形式未対応
+- **pathlist不整合**: 音声ファイル用pathlist未作成
+
+**FIXME**: 
+- MIR-1K pathlist 生成の自動化
+- LibriTTS-R の F0 ラベル不要での学習対応
+
+#### Phase 2: Pitch Encoder実装 🚧 **要破壊的変更**
+**実装対象**: 現在のConformer Predictor → NANSY++ベース Pitch Encoder
 **実装手順**:
-1. ✅ `requirements.txt` 作成完了（torch, torchaudio, numpy, scipy, librosa + データセットダウンロード用ライブラリ）
-2. ✅ `scripts/` ディレクトリ作成済み（ダウンロードスクリプト配置済み）
-3. ⬜ `src/` ディレクトリ作成
-4. ⬜ `tests/`, `configs/` ディレクトリ作成
-5. ⬜ `__init__.py` ファイル配置
+1. **Predictor.forward()変更**: 汎用出力 → (F0確率分布, Band Aperiodicity)
+2. **CQT統合**: data.py の CQT → Predictor 内部に移動
+3. **損失変更**: model.py の cross_entropy → L_cons (Pitch Consistency)
+4. **ピッチシフト**: batch内でのCQTピッチシフト実装
 
-**曖昧な部分**: 
-- librosa vs torchaudio での CQT 実装選択 (FIXME: 性能比較必要)
+**FIXME**:
+- NANSY++ の具体的なアーキテクチャ詳細
+- CQT の最適な埋め込み位置
 
-#### 1.2 設定管理システム（config.py）
-**実装対象**: argparse ベースの設定管理
-**参考資料**: 論文 Table 1 (Model details)
+#### Phase 3: DSP統合・絶対ピッチ学習 🔬 **新規実装**
+**実装対象**: dsp/モジュール群とSLASH特化損失関数
 **実装手順**:
-1. `Config` クラス作成
-2. argparse による全パラメータ定義
-3. 設定ファイル（YAML/JSON）読み込み機能
-4. 実験管理用の設定保存機能
+1. **dsp/pitch_guide.py**: SHS (Subharmonic Summation) による事前分布
+2. **dsp/pseudo_spec.py**: 微分可能スペクトログラム生成 (三角波振動子)
+3. **model.py拡張**: L_guide, L_pseudo 損失追加
+4. **統合テスト**: 相対+絶対ピッチ学習の動作確認
 
-**曖昧な部分**:
-- Dynamic batching のバッチサイズ決定ロジック (FIXME: ESPnet-TTS[27]参照)
+**FIXME**:
+- SHS アルゴリズムの具体的パラメータ
+- 三角波振動子の正確な実装式
+- Fine structure spectrum の計算方法
 
-#### 1.3 データローダー（dataset.py）
-**実装対象**: LibriTTS-R（学習用）, MIR-1K（評価用）データセット対応
-**参考資料**: 
-- LibriTTS-R 論文 (データフォーマット) ← 学習用
-- MIR-1K 論文 (アノテーション形式) ← 評価用
+#### Phase 4: 完全統合・DDSP実装 🎵 **高度実装**
+**実装対象**: 微分可能音声合成と GED 損失
 **実装手順**:
-1. `BaseDataset` 抽象クラス作成
-2. `LibriTTSDataset` クラス実装（学習専用）
-3. `MIR1KDataset` クラス実装（評価専用）  
-4. 音声ファイル読み込み・リサンプリング処理
-5. データ拡張（ノイズ付加、音量変更）実装（学習時のみ）
+1. **dsp/ddsp_synthesizer.py**: 時間領域音声合成
+2. **dsp/vuv_detector.py**: V/UV (有声/無声) 判定器
+3. **model.py完成**: L_recon (GED) 損失実装
+4. **ノイズロバスト**: データ拡張損失 (L_aug系) 実装
+5. **最適化**: Dynamic batching, メモリ効率化
 
-**曖昧な部分**:
-- ✅ **MIR-1K アノテーションの読み込み形式確認済み**:
-  - PitchLabel/*.pv: セミトーン値、0=無声
-  - UnvoicedFrameLabel/*: 5分類の音素ラベル
-  - vocal-nonvocalLabel/*: V/UVセグメントラベル
-  - フレーム: 40ms窓、20msシフト
-- ノイズ付加の具体的手法（SNR -6dB の実装）(FIXME: 論文3.1節参照)
+**FIXME**:
+- 最小位相応答の実装方法
+- GED損失の安定化手法
+- Dynamic batching の具体的制御方法
 
-#### 1.4 CQT Analyzer 基本実装
-**実装対象**: Constant-Q Transform による特徴抽出
-**参考資料**: 
-- Brown 1991: CQT 原論文
-- librosa.cqt() ドキュメント
-**実装手順**:
-1. CQT パラメータ設定（f_min=32.70Hz, 205bins, 24bins/octave）
-2. フレームシフト 5ms の実装
-3. フィルタースケール 0.5 の適用
-4. 中央 176 bins の抽出処理
+### 🚀 **現在の実装状況**
+**Phase 1 進捗**: ✅ SLASH設定対応完了、🔄 データ構造変更継続中
+- ✅ config.py変更 → ✅ base_config.yaml変更 → 🔄 データ構造変更 → 🔄 動作確認 → Phase 2へ
 
-**曖昧な部分**:
-- filter_scale=0.5 の具体的な効果と実装方法 (FIXME: librosa実装確認)
+**次のステップ**: InputData/OutputData の SLASH 対応 → コンパイルエラー解消 → 動作確認
 
 ### Phase 2: 相対ピッチ学習（推定期間: 4-6日）
 
@@ -585,62 +592,80 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 - 論文の式番号と実装の対応を明記（コメント内）
 
 
-## 主なコンポーネント
+## 主なコンポーネント (**現在**: 汎用MLフレームワーク → **SLASH専用に破壊的変更予定**)
 
-### 設定管理 (`src/hiho_pytorch_base/config.py`)
-```python
-DataFileConfig:     # ファイルパス設定
-DatasetConfig:      # データセット分割設定
-NetworkConfig:      # ネットワーク構造設定
-ModelConfig:        # モデル設定
-TrainConfig:        # 学習パラメータ設定
-ProjectConfig:      # プロジェクト情報設定
-```
+### 設定管理 (`src/unofficial_slash/config.py`) 
+**現在**: 汎用ML設定 → **SLASH特化設定に変更予定**
+- `DataFileConfig`: pathlist管理 → SLASH音声データ用
+- `NetworkConfig`: 汎用NN設定 → Pitch Encoder + CQT設定
+- `ModelConfig`: 汎用モデル設定 → SLASH損失関数設定
+- `DatasetConfig`, `TrainConfig`, `ProjectConfig`: 継続使用
 
 ### 学習システム (`scripts/train.py`)
-- PyTorch独自実装の学習ループ
+**継続使用**: PyTorchエポックベース学習ループ
 - TensorBoard/W&B統合
-- torch.amp（Automatic Mixed Precision）対応
-- エポックベーススケジューラー対応
-- スナップショット保存・復旧機能
+- torch.amp対応
+- スナップショット機能
 
-### データ処理 (`src/hiho_pytorch_base/dataset.py`)
-- 遅延読み込みによるメモリ効率化
-- dataclassベースの型安全なデータ構造
-- train/test/eval/valid の4種類データセット対応
-- pathlistファイル方式によるファイル管理
-- stemベース対応付けで異なるデータタイプを自動関連付け
-- 多話者学習対応（JSON形式の話者マッピング）
+### データ処理 (`src/unofficial_slash/dataset.py`)
+**部分変更予定**: pathlistシステムをSLASH用に適応
+- 遅延読み込み、dataclass構造: 継続使用
+- train/test/eval/valid: 継続使用
+- **変更予定**: 話者マッピング削除、音声+ピッチラベル対応
+- **新規実装**: CQT変換、MIR-1Kピッチラベル読み込み
 
-### ネットワーク (`src/hiho_pytorch_base/network/predictor.py`)
-- マルチタスク予測器
-- 固定長・可変長データの統一処理
-- マルチヘッド出力対応
+### ネットワーク (`src/unofficial_slash/network/predictor.py`)
+**破壊的変更予定**: 汎用Predictor → SLASH Pitch Encoder
+- **現在**: Conformerベースマルチタスク予測器
+- **変更後**: NANSY++ベース Pitch Encoder
+  - 入力: CQT (T×176)
+  - 出力: F0確率分布 P (T×1024) + Band Aperiodicity B (T×8)
+- Conformerアーキテクチャは部分流用予定
 
-### 推論・生成
-- `src/hiho_pytorch_base/generator.py`: 推論ジェネレーター
+### 損失計算 (`src/unofficial_slash/model.py`)
+**破壊的変更予定**: 汎用損失 → SLASH特化損失関数
+- **現在**: cross_entropy + mse_loss
+- **変更後**: L_cons + L_guide + L_pseudo + L_recon (GED)
+
+### DSPモジュール (`src/unofficial_slash/dsp/`) 
+**新規実装予定**:
+- CQT Analyzer: 定 Q 変換による特徴抽出
+- Pitch Guide Generator: SHS による事前分布計算
+- Pseudo Spectrogram Generator: 微分可能スペクトログラム生成
+- DDSP Synthesizer: 音声再合成
+- V/UV Detector: 有声/無声判定
+
+### 推論・生成システム
+**継続使用**: 現在のフレームワーク構造
+- `src/unofficial_slash/generator.py`: 推論ジェネレーター  
 - `scripts/generate.py`: 推論実行スクリプト
+- **変更予定**: F0推定結果出力に特化
 
 ### テストシステム
-- 自動テストデータ生成
-- エンドツーエンドテスト
-- 統合テスト
+**継続使用**: 現在のテストシステム
+- 自動テストデータ生成  
+- **変更予定**: SLASH用テストケース追加
 
-## 使用方法
+## 使用方法 (**継続使用**: 現在のコマンド構造)
 
-### 学習実行
+### SLASH学習実行 (現在のコマンドをSLASH用設定で使用)
 ```bash
-uv run -m scripts.train <config_yaml_path> <output_dir>
+# LibriTTS-Rでの学習 (現在のconfig.yamlをSLASH用に変更後)
+uv run -m scripts.train configs/slash_libritts.yaml output/slash_train
+
+# MIR-1Kでの評価
+uv run -m scripts.train configs/slash_mir1k_eval.yaml output/slash_eval
 ```
 
-### 推論実行
+### SLASH推論実行 (F0推定結果出力)
 ```bash
-uv run -m scripts.generate --model_dir <model_dir> --output_dir <output_dir> [--use_gpu]
+# 現在のgenerate.pyをSLASH用に変更後使用
+uv run -m scripts.generate --model_dir output/slash_train --output_dir output/f0_results [--use_gpu]
 ```
 
 ### データセットチェック
 ```bash
-uv run -m scripts.check_dataset <config_yaml_path> [--trials 10]
+uv run -m scripts.check_dataset configs/slash_config.yaml [--trials 10]
 ```
 
 ### テスト実行
@@ -648,13 +673,12 @@ uv run -m scripts.check_dataset <config_yaml_path> [--trials 10]
 uv run pytest tests/ -sv
 ```
 
-### 開発環境セットアップ
+### 開発コマンド
 ```bash
+# 環境セットアップ
 uv sync
-```
 
-### 静的解析とフォーマット
-```bash
+# 静的解析とフォーマット  
 uv run pyright && uv run ruff check --fix && uv run ruff format
 ```
 

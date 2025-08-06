@@ -1,0 +1,44 @@
+name: Test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: <Setup> リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: <Setup> uvをインストール
+        uses: astral-sh/setup-uv@v6
+
+      - name: <Setup> Pythonをセットアップ
+        run: uv python install
+
+      - name: <Setup> 依存関係をインストール
+        run: uv sync
+
+      - name: <Test> 静的解析を実行
+        run: |
+          uv run pyright
+          uv run ruff check
+          uv run ruff format --check
+
+      - name: <Test> テストを実行
+        run: uv run pytest tests/
+
+  docker-build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: <Setup> リポジトリをチェックアウト
+        uses: actions/checkout@v4
+
+      - name: <Test> Dockerイメージをビルド
+        run: docker build -t hiho-pytorch-base .
+
+      - name: <Test> Dockerイメージを確認
+        run: docker images hiho-pytorch-base
