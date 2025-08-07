@@ -44,6 +44,9 @@ network:
   pseudo_spec_n_fft: 1024
   pseudo_spec_hop_length: 120
   
+  # DDSP Synthesizer 設定
+  ddsp_n_harmonics: 16  # ハーモニクス次数
+  
   # V/UV Detector 設定
   vuv_detector_eps: 1e-8
   vuv_threshold: 0.5
@@ -61,6 +64,11 @@ model:
   hinge_margin: 0.5
   ged_alpha: 0.1
   epsilon: 0.001
+  huber_delta: 1.0  # Pitch Consistency Loss用のHuber損失デルタ
+  
+  # F0境界値
+  f0_min: 20.0    # 人間の音声の最低F0 (Hz)
+  f0_max: 2000.0  # 人間の音声の最高F0 (Hz)
 
 train:
   batch_size: 17

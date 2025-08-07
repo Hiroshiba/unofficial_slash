@@ -86,6 +86,7 @@ class Predictor(nn.Module):
         sample_rate: int,
     ):
         super().__init__()
+        self.network_config = network_config
 
         # GPU対応CQT変換器（nnAudio）
         self.cqt_transform = CQT(
@@ -126,8 +127,8 @@ class Predictor(nn.Module):
         self.ddsp_synthesizer = DDSPSynthesizer(
             sample_rate=sample_rate,
             n_fft=network_config.pseudo_spec_n_fft,
-            hop_length=network_config.cqt_hop_length,
-            n_harmonics=16,  # FIXME: ハーモニクス次数16が固定値 - 論文で最適値不明
+            hop_length=network_config.pseudo_spec_hop_length,
+            n_harmonics=network_config.ddsp_n_harmonics,  # 設定から取得
         )
 
         # V/UV Detector初期化
@@ -163,6 +164,11 @@ class Predictor(nn.Module):
     ) -> tuple[Tensor, Tensor, Tensor]:  # (B, T, ?), (B, T), (B, T, ?)
         """通常の推論用: audio -> CQT -> encode"""
         # GPU対応CQT変換
+        # FIXME: CQT時間軸整合性確保 - 重要度：高
+        # 1. nnAudio.CQTのhop_length=120による時間フレーム数計算
+        # 2. model.pyのtorch.stftと同一audio入力での時間軸T一致が前提
+        # 3. 異なる音声長での動作一貫性・境界処理の検証が必要
+        # 4. CQT変換後のフレーム数がPredictorの出力時間軸と一致することを保証
         cqt_full = self.cqt_transform(audio)  # (B, cqt_total_bins, T)
 
         # 中央176 binsを抽出

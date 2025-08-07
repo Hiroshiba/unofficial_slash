@@ -82,6 +82,13 @@ def fine_structure_spectrum(
     SLASH論文 Equation (2):
     ψ(S) = log(S) - W(log(S))
 
+    FIXME: Fine structure spectrum計算最適化 - 重要度：中
+    1. model.pyでL_pseudo・L_recon・pitch_guide用に複数回呼ばれる計算負荷
+    2. 数値安定性: log(0)回避のeps=1e-6が適切かの検証
+    3. ケプストラム畳み込みの効率化・GPU最適化の余地
+    4. バッチサイズが大きい場合のメモリ使用量最適化
+    5. window_size=50の妥当性・他の窓サイズとの比較検証
+
     Args:
         amplitude_spectrogram: 振幅スペクトログラム S (B, T, K)
         window_size: lag-window法の窓サイズ
@@ -90,11 +97,6 @@ def fine_structure_spectrum(
     -------
         Fine structure spectrum ψ(S) (B, T, K)
     """
-    # 小さな値を加算してlog(0)を回避
-    # FIXME: 数値安定性の強化が必要 - Phase 4c で優先対応
-    # 1. 現在のeps=1e-8では極小値での精度問題が発生する可能性
-    # 2. 入力に既にNaN/Infが含まれる場合の対処が不十分
-    # 3. 極端なF0値・Aperiodicity値での処理安定化が必要
     eps = 1e-8
     log_spec = torch.log(amplitude_spectrogram + eps)
 

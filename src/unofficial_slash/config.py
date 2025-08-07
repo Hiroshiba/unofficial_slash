@@ -61,6 +61,9 @@ class NetworkConfig(BaseModel):
     pseudo_spec_n_fft: int
     pseudo_spec_hop_length: int
 
+    # DDSP Synthesizer 設定
+    ddsp_n_harmonics: int
+
     # V/UV Detector 設定
     vuv_detector_eps: float
     vuv_threshold: float
@@ -81,6 +84,11 @@ class ModelConfig(BaseModel):
     hinge_margin: float
     ged_alpha: float
     epsilon: float
+    huber_delta: float  # Pitch Consistency Loss用のHuber損失デルタ
+    
+    # F0境界値
+    f0_min: float  # 人間の音声の最低F0 (Hz)
+    f0_max: float  # 人間の音声の最高F0 (Hz)
 
 
 class TrainConfig(BaseModel):

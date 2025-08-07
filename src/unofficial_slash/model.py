@@ -41,15 +41,12 @@ def pitch_consistency_loss(
     f0_shifted: Tensor,  # (B, T) シフト後のF0値
     shift_semitones: Tensor,  # (B,) ピッチシフト量（semitones）
     delta: float,  # Huber損失のデルタ
+    f0_min: float,  # F0最小値
+    f0_max: float,  # F0最大値
 ) -> Tensor:
     """Pitch Consistency Loss (L_cons) - SLASH論文 Equation (1)"""
     # log2(p_t) - log2(p_shift_t) + d/12 を計算
-    # 数値安定性強化: より安全な範囲でクランプ
-    eps = 1e-6
-    f0_min = 20.0  # 人間の音声の最低F0
-    f0_max = 2000.0  # 人間の音声の最高F0
-    # FIXME: F0境界値付近での動作検証が不完全
-    # 20Hz, 2000Hz付近でのlog計算・損失計算の数値安定性未確認
+    # 数値安定性強化: 設定値による境界でクランプ
     f0_original_safe = torch.clamp(f0_original, min=f0_min, max=f0_max)
     f0_shifted_safe = torch.clamp(f0_shifted, min=f0_min, max=f0_max)
 
@@ -142,11 +139,12 @@ def reconstruction_loss(
 def f0_mean_absolute_error(
     pred_f0: Tensor,  # (B, T) 予測F0値
     target_f0: Tensor,  # (B, T) ターゲットF0値
+    f0_min: float,  # F0最小値
+    f0_max: float,  # F0最大値
 ) -> Tensor:
     """F0のMAE（Mean Absolute Error）を計算"""
     with torch.no_grad():
-        # 有効なF0値の範囲を限定（20Hz-2000Hz）
-        f0_min, f0_max = 20.0, 2000.0
+        # 設定値による有効なF0値の範囲を限定
         valid_mask = (target_f0 >= f0_min) & (target_f0 <= f0_max)
         if valid_mask.sum() > 0:
             mae = torch.abs(pred_f0[valid_mask] - target_f0[valid_mask]).mean()
@@ -188,10 +186,17 @@ class Model(nn.Module):
                 f0_original=f0_values,
                 f0_shifted=f0_values_shifted,
                 shift_semitones=batch.pitch_shift_semitones,
-                delta=1.0,
+                delta=self.model_config.huber_delta,
+                f0_min=self.model_config.f0_min,
+                f0_max=self.model_config.f0_max,
             )
         else:
             # 評価時: ピッチシフトなし
+            # FIXME: バッチ処理設計の非対称性 - 重要度：中
+            # 1. 評価時はshift=0だがL_cons=0で損失計算をスキップ
+            # 2. 論文的にはshift=0でも相対ピッチ学習を行うべき可能性
+            # 3. 学習時と評価時で処理フローが異なることによる一貫性の問題
+            # 4. pitch_shift_semitones=0でも学習と同等の処理をすべきか検討要
             f0_probs, f0_values, bap = self.predictor(batch.audio)
             loss_cons = torch.tensor(0.0, device=device)
 
@@ -206,7 +211,12 @@ class Model(nn.Module):
 
         # BAP損失（暫定MSE、Phase 3でより詳細な実装予定）
         # 無声音部分のaperiodicityは高く、有声音部分は低くなるべき
-        voiced_mask = target_f0 > 0  # 有声音マスク
+        # FIXME: V/UV判定ロジックの混在問題 - 重要度：高
+        # 1. ここではtarget_f0 > 0を使用（従来の単純判定）
+        # 2. L_pseudo損失ではV/UV Detectorの出力を使用（論文準拠判定）
+        # 3. 全体で論文準拠のV/UV判定に統一すべき（一貫性・精度向上のため）
+        # 4. target_f0ベースは学習データのラベル品質に依存するリスク
+        voiced_mask = target_f0 > 0  # 有声音マスク（暫定）
 
         # 暫定的なBAP損失（voiced部分は低く、unvoiced部分は高く）
         bap_target = torch.where(
@@ -220,13 +230,16 @@ class Model(nn.Module):
         device = batch.audio.device
         
         # STFTでターゲットスペクトログラムを計算
-        # FIXME: STFTとCQTの時間軸不整合問題 - Phase 4c で優先解決が必要
-        # 1. hop_lengthが異なる場合の時間軸対応が不完全
-        # 2. CQT(B,F,T)とSTFT(B,T,F)の次元順序が混在
-        # 3. フレーム数が一致しない可能性により学習が不安定になるリスク
-        n_fft = self.predictor.pseudo_spec_generator.n_freq_bins * 2 - 2
-        hop_length = self.predictor.cqt_transform.hop_length
+        # NetworkConfigから統一的にパラメータを取得（時間軸不整合問題を解決）
+        n_fft = self.predictor.network_config.pseudo_spec_n_fft
+        hop_length = self.predictor.network_config.pseudo_spec_hop_length
         
+        # FIXME: CQT-STFTフレーム数整合性問題 - 重要度：高
+        # 1. 同じhop_length=120でもnnAudio.CQTとtorch.stftで実装差がある可能性
+        # 2. 異なる音声長に対するフレーム数計算の一貫性が未検証
+        # 3. CQT出力: (B, freq_bins, T), STFT出力: (B, freq_bins, T) だが微妙な差の可能性
+        # 4. f0_values(B, T)とtarget_spectrogram(B, T, K)の時間軸Tが一致する保証が不完全
+        # 5. 実学習時にテンソル形状エラーが発生するリスク
         stft_result = torch.stft(
             batch.audio,
             n_fft=n_fft,
@@ -242,10 +255,7 @@ class Model(nn.Module):
         # Pseudo Spectrogram生成
         pseudo_spectrogram = self.predictor.pseudo_spec_generator(f0_for_pseudo)
         
-        # スペクトル包絡推定（V/UV判定・L_pseudo・L_recon共用）
-        # FIXME: スペクトル包絡推定の重複計算問題
-        # 現在、L_pseudo用とL_recon用で同じスペクトル包絡推定を2回実行している
-        # 計算コストとメモリ使用量の無駄。一度計算した結果を再利用すべき
+        # スペクトル包絡推定（一度の計算で全ての損失関数で共用）
         batch_size, time_frames = f0_values.shape
         freq_bins = target_spectrogram.shape[-1]
         
@@ -310,7 +320,12 @@ class Model(nn.Module):
         )
 
         # 評価指標計算
-        f0_mae = f0_mean_absolute_error(f0_values, target_f0)
+        f0_mae = f0_mean_absolute_error(
+            pred_f0=f0_values,
+            target_f0=target_f0,
+            f0_min=self.model_config.f0_min,
+            f0_max=self.model_config.f0_max,
+        )
 
         return ModelOutput(
             loss=total_loss,
