@@ -43,6 +43,10 @@ network:
   pseudo_spec_epsilon: 0.001
   pseudo_spec_n_fft: 1024
   pseudo_spec_hop_length: 120
+  
+  # V/UV Detector 設定
+  vuv_detector_eps: 1e-8
+  vuv_threshold: 0.5
 
 model:
   # 損失重み
@@ -56,7 +60,6 @@ model:
   # 損失パラメータ
   hinge_margin: 0.5
   ged_alpha: 0.1
-  vuv_threshold: 0.5
   epsilon: 0.001
 
 train:

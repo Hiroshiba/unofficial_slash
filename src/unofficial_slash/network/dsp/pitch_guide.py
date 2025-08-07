@@ -195,9 +195,12 @@ class PitchGuideGenerator(nn.Module):
             self.f_max,
         )  # (B, T, F)
 
-        # FIXME: フレーム別正規化処理の効率化が必要
-        # 現在のループ処理はメモリ効率が悪く、大きなバッチサイズで問題となる可能性
-        # torch.max(dim=1)を時間軸でベクトル化して高速化すべき
+        # FIXME: SHSアルゴリズムの効率化と最適化 - 中優先度
+        # 1. フレーム別正規化のループ処理はメモリ効率が悪い
+        # 2. torch.max(dim=-1)を使用したベクトル化による高速化が必要
+        # 3. SHS重み係数（0.86）が論文特有の値か、調整可能か不明
+        # 4. サブハーモニック次数n_maxの最適値が論文で不明確
+        # 5. 大きなバッチサイズでのメモリ使用量最適化が未実施
         # 各フレームで最大値を1に正規化
         time_frames = shs_spectrum.shape[1]
         normalized_spectrum = torch.zeros_like(shs_spectrum)

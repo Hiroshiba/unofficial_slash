@@ -9,7 +9,7 @@ from torch.nn.functional import huber_loss
 
 from unofficial_slash.batch import BatchOutput
 from unofficial_slash.config import ModelConfig
-from unofficial_slash.network.dsp.fine_structure import fine_structure_spectrum
+from unofficial_slash.network.dsp.fine_structure import fine_structure_spectrum, lag_window_spectral_envelope
 from unofficial_slash.network.predictor import Predictor
 from unofficial_slash.utility.train_utility import DataNumProtocol
 
@@ -44,10 +44,14 @@ def pitch_consistency_loss(
 ) -> Tensor:
     """Pitch Consistency Loss (L_cons) - SLASH論文 Equation (1)"""
     # log2(p_t) - log2(p_shift_t) + d/12 を計算
-    # 無効値（0Hz以下）を避けるため小さな値を加算
-    eps = 1e-8
-    f0_original_safe = torch.clamp(f0_original, min=eps)
-    f0_shifted_safe = torch.clamp(f0_shifted, min=eps)
+    # 数値安定性強化: より安全な範囲でクランプ
+    eps = 1e-6
+    f0_min = 20.0  # 人間の音声の最低F0
+    f0_max = 2000.0  # 人間の音声の最高F0
+    # FIXME: F0境界値付近での動作検証が不完全
+    # 20Hz, 2000Hz付近でのlog計算・損失計算の数値安定性未確認
+    f0_original_safe = torch.clamp(f0_original, min=f0_min, max=f0_max)
+    f0_shifted_safe = torch.clamp(f0_shifted, min=f0_min, max=f0_max)
 
     log_diff = torch.log2(f0_original_safe) - torch.log2(f0_shifted_safe)
 
@@ -68,11 +72,7 @@ def pitch_guide_loss(
     pitch_guide: Tensor,  # (B, T, F) Pitch Guide
     hinge_margin: float,  # ヒンジ損失のマージン
 ) -> Tensor:
-    """
-    Pitch Guide Loss (L_guide) - SLASH論文 Equation (3)
-
-    L_g = (1/T) * Σ_t max(1 - Σ_f P_{t,f} * G_{t,f} - m, 0)
-    """
+    """Pitch Guide Loss (L_guide) - SLASH論文 Equation (3)"""
     # F0確率分布をsoftmaxで正規化（論文の確率分布Pとして扱う）
     normalized_probs = F.softmax(f0_probs, dim=-1)  # (B, T, F)
 
@@ -94,20 +94,7 @@ def pseudo_spectrogram_loss(
     vuv_mask: Tensor,  # (B, T) V/UV mask (1: voiced, 0: unvoiced)
     window_size: int,  # Fine structure spectrum用の窓サイズ
 ) -> Tensor:
-    """
-    Pseudo Spectrogram Loss (L_pseudo) - SLASH論文 Equation (6)
-
-    L_pseudo = ||ψ(S*) - ψ(S)||₁ ⊙ (v × 1_K)
-
-    Args:
-        pseudo_spectrogram: 生成されたPseudo Spectrogram S* (B, T, K)
-        target_spectrogram: ターゲットSpectrogram S (B, T, K)
-        vuv_mask: 有声/無声マスク v (B, T)
-        window_size: Fine structure spectrum計算用の窓サイズ
-
-    Returns:
-        L_pseudo損失
-    """
+    """Pseudo Spectrogram Loss (L_pseudo) - SLASH論文 Equation (6)"""
     # Fine structure spectrum計算: ψ(S*) と ψ(S)
     psi_pseudo = fine_structure_spectrum(pseudo_spectrogram, window_size)  # (B, T, K)
     psi_target = fine_structure_spectrum(target_spectrogram, window_size)  # (B, T, K)
@@ -134,22 +121,7 @@ def reconstruction_loss(
     ged_alpha: float,  # GEDの反発項重み α
     window_size: int,  # Fine structure spectrum用の窓サイズ
 ) -> Tensor:
-    """
-    Reconstruction Loss (L_recon) - SLASH論文 Equation (8)
-    Generalized Energy Distance (GED)
-
-    L_recon = ||ψ(S˜1) - ψ(S)||₁ - α ||ψ(S˜1) - ψ(S˜2)||₁
-
-    Args:
-        generated_spec_1: 1つ目の生成スペクトログラム S˜1 (B, T, K)
-        generated_spec_2: 2つ目の生成スペクトログラム S˜2 (B, T, K)
-        target_spectrogram: ターゲットスペクトログラム S (B, T, K)
-        ged_alpha: 反発項の重み α (論文では0.1)
-        window_size: Fine structure spectrum計算用の窓サイズ
-
-    Returns:
-        L_recon損失
-    """
+    """Reconstruction Loss (L_recon) - SLASH論文 Equation (8) GED"""
     # Fine structure spectrum計算: ψ(S˜1), ψ(S˜2), ψ(S)
     psi_gen_1 = fine_structure_spectrum(generated_spec_1, window_size)  # (B, T, K)
     psi_gen_2 = fine_structure_spectrum(generated_spec_2, window_size)  # (B, T, K)
@@ -173,12 +145,13 @@ def f0_mean_absolute_error(
 ) -> Tensor:
     """F0のMAE（Mean Absolute Error）を計算"""
     with torch.no_grad():
-        # 有効なF0値のみでMAE計算（0Hzは無声音なので除外）
-        valid_mask = target_f0 > 0
+        # 有効なF0値の範囲を限定（20Hz-2000Hz）
+        f0_min, f0_max = 20.0, 2000.0
+        valid_mask = (target_f0 >= f0_min) & (target_f0 <= f0_max)
         if valid_mask.sum() > 0:
             mae = torch.abs(pred_f0[valid_mask] - target_f0[valid_mask]).mean()
         else:
-            mae = torch.tensor(0.0, device=target_f0.device)
+            mae = torch.tensor(0.0, device=target_f0.device, dtype=pred_f0.dtype)
         return mae
 
 
@@ -269,8 +242,36 @@ class Model(nn.Module):
         # Pseudo Spectrogram生成
         pseudo_spectrogram = self.predictor.pseudo_spec_generator(f0_for_pseudo)
         
-        # V/UVマスク作成（F0 > 0の部分が有声音）
-        vuv_mask = target_f0 > 0  # (B, T)
+        # スペクトル包絡推定（V/UV判定・L_pseudo・L_recon共用）
+        # FIXME: スペクトル包絡推定の重複計算問題
+        # 現在、L_pseudo用とL_recon用で同じスペクトル包絡推定を2回実行している
+        # 計算コストとメモリ使用量の無駄。一度計算した結果を再利用すべき
+        batch_size, time_frames = f0_values.shape
+        freq_bins = target_spectrogram.shape[-1]
+        
+        log_target_spec = torch.log(torch.clamp(target_spectrogram, min=1e-6))
+        spectral_envelope = torch.exp(lag_window_spectral_envelope(
+            log_target_spec, 
+            window_size=self.predictor.pitch_guide_generator.window_size
+        ))
+        
+        # BAP -> aperiodicity変換
+        if bap.shape[-1] != freq_bins:
+            bap_upsampled = F.interpolate(
+                bap.transpose(1, 2),  # (B, bap_bins, T)
+                size=(freq_bins,),
+                mode='linear',
+                align_corners=False
+            ).transpose(1, 2)  # (B, T, freq_bins)
+        else:
+            bap_upsampled = bap
+        aperiodicity = torch.sigmoid(bap_upsampled)
+        
+        # V/UV Detector使用でV/UVマスク生成
+        _, _, v_continuous, vuv_mask = self.predictor.detect_vuv(
+            spectral_envelope=spectral_envelope,
+            aperiodicity=aperiodicity,
+        )
         
         # L_pseudo損失計算
         loss_pseudo = pseudo_spectrogram_loss(
@@ -281,34 +282,6 @@ class Model(nn.Module):
         )
 
         # L_recon損失 (GED) 計算
-        # ターゲットスペクトログラムからスペクトル包絡を推定
-        from unofficial_slash.network.dsp.fine_structure import lag_window_spectral_envelope
-        
-        batch_size, time_frames = f0_values.shape
-        freq_bins = target_spectrogram.shape[-1]
-        
-        # ターゲットスペクトログラムの対数を取ってスペクトル包絡を推定
-        log_target_spec = torch.log(target_spectrogram + 1e-8)
-        spectral_envelope = torch.exp(lag_window_spectral_envelope(
-            log_target_spec, 
-            window_size=self.predictor.pitch_guide_generator.window_size
-        ))
-        
-        # Band Aperiodicityを周波数軸に線形補間してaperiodicityを作成
-        # bap: (B, T, bap_bins) -> aperiodicity: (B, T, freq_bins)
-        if bap.shape[-1] != freq_bins:
-            bap_upsampled = F.interpolate(
-                bap.transpose(1, 2),  # (B, bap_bins, T)
-                size=(freq_bins,),
-                mode='linear',
-                align_corners=False
-            ).transpose(1, 2)  # (B, T, freq_bins)
-        else:
-            bap_upsampled = bap
-        
-        # aperiodicityをsigmoidで0-1範囲に正規化
-        aperiodicity = torch.sigmoid(bap_upsampled)
-        
         # DDSP Synthesizerで2つの異なるスペクトログラムを生成
         generated_spec_1, generated_spec_2 = self.predictor.ddsp_synthesizer.generate_two_spectrograms(
             f0_values=f0_values,

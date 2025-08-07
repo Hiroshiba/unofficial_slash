@@ -12,6 +12,7 @@ from unofficial_slash.network.conformer.encoder import Encoder
 from unofficial_slash.network.dsp.ddsp_synthesizer import DDSPSynthesizer
 from unofficial_slash.network.dsp.pitch_guide import PitchGuideGenerator
 from unofficial_slash.network.dsp.pseudo_spec import PseudoSpectrogramGenerator
+from unofficial_slash.network.dsp.vuv_detector import VUVDetector
 from unofficial_slash.network.transformer.utility import make_non_pad_mask
 
 
@@ -126,7 +127,13 @@ class Predictor(nn.Module):
             sample_rate=sample_rate,
             n_fft=network_config.pseudo_spec_n_fft,
             hop_length=network_config.cqt_hop_length,
-            n_harmonics=16,  # ハーモニクス次数（論文値）
+            n_harmonics=16,  # FIXME: ハーモニクス次数16が固定値 - 論文で最適値不明
+        )
+
+        # V/UV Detector初期化
+        self.vuv_detector = VUVDetector(
+            vuv_threshold=network_config.vuv_threshold,
+            eps=network_config.vuv_detector_eps,
         )
 
         self.speaker_embedder = nn.Embedding(speaker_size, speaker_embedding_size)
@@ -241,6 +248,14 @@ class Predictor(nn.Module):
         f0_values = f0_probs_to_f0(f0_probs, self.frequency_scale)
 
         return f0_probs, f0_values, bap
+
+    def detect_vuv(
+        self,
+        spectral_envelope: Tensor,  # (B, T, K)
+        aperiodicity: Tensor,  # (B, T, K)
+    ) -> tuple[Tensor, Tensor, Tensor, Tensor]:
+        """V/UV判定を実行"""
+        return self.vuv_detector(spectral_envelope, aperiodicity)
 
 
 def create_predictor(network_config: NetworkConfig, sample_rate: int) -> Predictor:

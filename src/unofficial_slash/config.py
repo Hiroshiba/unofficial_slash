@@ -61,6 +61,10 @@ class NetworkConfig(BaseModel):
     pseudo_spec_n_fft: int
     pseudo_spec_hop_length: int
 
+    # V/UV Detector 設定
+    vuv_detector_eps: float
+    vuv_threshold: float
+
 
 class ModelConfig(BaseModel):
     """SLASH 損失関数の設定"""
@@ -76,7 +80,6 @@ class ModelConfig(BaseModel):
     # 損失パラメータ
     hinge_margin: float
     ged_alpha: float
-    vuv_threshold: float
     epsilon: float
 
 

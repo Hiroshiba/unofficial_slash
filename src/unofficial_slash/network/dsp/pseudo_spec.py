@@ -18,18 +18,7 @@ def triangle_wave_oscillator(
     n_freq_bins: int,
     epsilon: float = 0.001,
 ) -> Tensor:
-    """
-    三角波振動子の実装 - SLASH論文 Equation (4) 関連
-
-    Args:
-        f0_values: F0値 (B, T)
-        sample_rate: サンプリングレート
-        n_freq_bins: 周波数ビン数 (K)
-        epsilon: 小さな値 ε
-
-    Returns:
-        三角波振動子の出力 X (B, T, K)
-    """
+    """三角波振動子の実装 - SLASH論文 Equation (4) 関連"""
     batch_size, time_frames = f0_values.shape
     device = f0_values.device
 
@@ -40,11 +29,12 @@ def triangle_wave_oscillator(
     f0_safe = torch.clamp(f0_values, min=1e-8)  # (B, T)
 
     # 位相計算: Φ_{t,k} = (f_s / (2 * p_t * K)) * k
-    # FIXME: 三角波振動子の精度問題 - Phase 4c で検証必要
-    # 1. 論文の位相計算式との完全一致が未検証
-    # 2. 時間tでの位相積算や連続性の処理が不完全  
-    # 3. 実際の三角波生成での時間進行が考慮されていない
-    # 4. 論文 Equation (4-6) との厳密な対応確認が必要
+    # FIXME: 三角波振動子の実装精度問題
+    # 1. 論文Equation (4)の位相計算式との完全一致が未検証
+    # 2. フレーム間の位相連続性・時間進行が考慮されていない
+    # 3. 実際の周期信号として正しい三角波が生成されているか未検証
+    # 4. F0値による位相積算の数学的妥当性確認が必要
+    # 5. 極端なF0値（20Hz, 2000Hz付近）での動作安定性未検証
     phase = (
         sample_rate
         / (2 * f0_safe.unsqueeze(-1) * n_freq_bins)
@@ -70,18 +60,7 @@ def pseudo_periodic_excitation(
     triangle_wave: Tensor,  # (B, T, K) 三角波振動子出力
     epsilon: float = 0.001,
 ) -> Tensor:
-    """
-    Pseudo Periodic Excitation の計算 - SLASH論文 Equation (4)
-
-    E*_p = max(X, ε)² + |Z · ε|
-
-    Args:
-        triangle_wave: 三角波振動子出力 X (B, T, K)
-        epsilon: 小さな値 ε
-
-    Returns:
-        Pseudo Periodic Excitation E*_p (B, T, K)
-    """
+    """Pseudo Periodic Excitation の計算 - SLASH論文 Equation (4)"""
     device = triangle_wave.device
 
     # max(X, ε)を計算
@@ -97,11 +76,7 @@ def pseudo_periodic_excitation(
 
 
 class PseudoSpectrogramGenerator(nn.Module):
-    """
-    Pseudo Spectrogram Generator
-
-    SLASH論文のF0勾配最適化用微分可能スペクトログラム生成器
-    """
+    """Pseudo Spectrogram Generator - SLASH論文のF0勾配最適化用"""
 
     def __init__(
         self,

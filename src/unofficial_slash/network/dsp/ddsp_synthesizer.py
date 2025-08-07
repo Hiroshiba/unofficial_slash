@@ -107,11 +107,14 @@ def generate_aperiodic_excitation(
 def apply_minimum_phase_response(
     excitation: Tensor,  # (B, T, frame_length)
 ) -> Tensor:
-    """
-    最小位相応答を適用（ケプストラム法による近似実装）
+    """最小位相応答を適用（ケプストラム法による近似実装）
     
-    FIXME: ケプストラム法の実装がscipy.signal.minimum_phaseと完全一致していない
-    論文では具体的な最小位相応答手法が明記されていないため、より正確な実装が必要
+    FIXME: 最小位相応答の実装精度問題 - 中優先度
+    1. ケプストラム法の実装がscipy.signal.minimum_phaseと完全一致していない
+    2. 論文では具体的な最小位相応答手法が明記されていない
+    3. 音響信号処理として正確な最小位相特性を持つか未検証
+    4. 異なる実装（Hilbert変換法等）との比較検討が必要
+    5. 音質への影響度合いの定量的評価が未実施
     
     Args:
         excitation: 励起信号 (B, T, frame_length)
@@ -294,12 +297,14 @@ class DDSPSynthesizer(nn.Module):
         spectral_envelope: Tensor,  # (B, T, K) スペクトル包絡
         aperiodicity: Tensor,  # (B, T, K) 非周期性
     ) -> Tuple[Tensor, Tensor]:
-        """
-        L_recon損失用に2つの異なるスペクトログラムS˜1, S˜2を生成
+        """L_recon損失用に2つの異なるスペクトログラムS˜1, S˜2を生成
         
-        FIXME: S˜1, S˜2の生成方法が論文で不明確（現在はランダムシードのみ）
-        論文では2つの異なる生成方法について具体的な記述がない
-        より適切な多様性生成手法の検討が必要
+        FIXME: 2つのスペクトログラム生成方法の不明確性 - 高優先度
+        1. 論文Equation (8)でS˜1, S˜2の生成方法が具体的に記述されていない
+        2. 現在はランダムシードの違いのみで生成しているが、これが適切か不明
+        3. 音響的に意味のある多様性を持つ2つのスペクトログラム生成手法が必要
+        4. F0値・aperiodicity・spectral envelopeのパラメータ摂動等の検討要
+        5. GED損失の反発項による最適化効果への影響が不明
         
         Returns:
             (S˜1, S˜2): 2つの合成スペクトログラム (B, T, K), (B, T, K)
