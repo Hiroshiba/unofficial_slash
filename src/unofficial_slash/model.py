@@ -192,11 +192,12 @@ class Model(nn.Module):
             )
         else:
             # 評価時: ピッチシフトなし
-            # FIXME: バッチ処理設計の非対称性 - 重要度：中
-            # 1. 評価時はshift=0だがL_cons=0で損失計算をスキップ
-            # 2. 論文的にはshift=0でも相対ピッチ学習を行うべき可能性
-            # 3. 学習時と評価時で処理フローが異なることによる一貫性の問題
-            # 4. pitch_shift_semitones=0でも学習と同等の処理をすべきか検討要
+            # FIXME: 評価時バッチ処理の設計不整合 - 重要度：中
+            # 1. 評価時はshift=0でL_cons=0となり損失計算をスキップしている
+            # 2. 論文的にはshift=0でも一貫した損失計算を行うべき可能性
+            # 3. 学習時と評価時で処理フローが異なり、評価の妥当性に懸念
+            # 4. pitch_shift_semitones=0でもforward_with_shift()を使用すべきか検討要
+            # 5. 現在の実装では評価時のL_cons寄与が完全にゼロになる
             f0_probs, f0_values, bap = self.predictor(batch.audio)
             loss_cons = torch.tensor(0.0, device=device)
 
@@ -209,37 +210,13 @@ class Model(nn.Module):
             hinge_margin=self.model_config.hinge_margin,
         )
 
-        # BAP損失（暫定MSE、Phase 3でより詳細な実装予定）
-        # 無声音部分のaperiodicityは高く、有声音部分は低くなるべき
-        # FIXME: V/UV判定ロジックの混在問題 - 重要度：高
-        # 1. ここではtarget_f0 > 0を使用（従来の単純判定）
-        # 2. L_pseudo損失ではV/UV Detectorの出力を使用（論文準拠判定）
-        # 3. 全体で論文準拠のV/UV判定に統一すべき（一貫性・精度向上のため）
-        # 4. target_f0ベースは学習データのラベル品質に依存するリスク
-        voiced_mask = target_f0 > 0  # 有声音マスク（暫定）
-
-        # 暫定的なBAP損失（voiced部分は低く、unvoiced部分は高く）
-        bap_target = torch.where(
-            voiced_mask.unsqueeze(-1),
-            torch.zeros_like(bap),  # 有声音: 0に近く
-            torch.ones_like(bap),  # 無声音: 1に近く
-        )
-        loss_bap = huber_loss(bap, bap_target)
-
         # Pseudo Spectrogram Loss (L_pseudo) 計算
         device = batch.audio.device
-        
+
         # STFTでターゲットスペクトログラムを計算
-        # NetworkConfigから統一的にパラメータを取得（時間軸不整合問題を解決）
         n_fft = self.predictor.network_config.pseudo_spec_n_fft
         hop_length = self.predictor.network_config.pseudo_spec_hop_length
-        
-        # FIXME: CQT-STFTフレーム数整合性問題 - 重要度：高
-        # 1. 同じhop_length=120でもnnAudio.CQTとtorch.stftで実装差がある可能性
-        # 2. 異なる音声長に対するフレーム数計算の一貫性が未検証
-        # 3. CQT出力: (B, freq_bins, T), STFT出力: (B, freq_bins, T) だが微妙な差の可能性
-        # 4. f0_values(B, T)とtarget_spectrogram(B, T, K)の時間軸Tが一致する保証が不完全
-        # 5. 実学習時にテンソル形状エラーが発生するリスク
+
         stft_result = torch.stft(
             batch.audio,
             n_fft=n_fft,
@@ -248,23 +225,30 @@ class Model(nn.Module):
             return_complex=True,
         )
         target_spectrogram = torch.abs(stft_result).transpose(-1, -2)  # (B, T, K)
-        
+
+        # CQT-STFTフレーム数整合性チェック
+        if target_spectrogram.shape[1] != f0_values.shape[1]:
+            raise ValueError(
+                f"CQT-STFT frame count mismatch: "
+                f"CQT={f0_values.shape[1]}, STFT={target_spectrogram.shape[1]}. "
+                f"Check hop_length consistency in NetworkConfig."
+            )
+
         # F0値のみ勾配を残してPseudo Spectrogram生成
         f0_for_pseudo = f0_values  # F0勾配最適化用
-        
+
         # Pseudo Spectrogram生成
         pseudo_spectrogram = self.predictor.pseudo_spec_generator(f0_for_pseudo)
-        
+
         # スペクトル包絡推定（一度の計算で全ての損失関数で共用）
-        batch_size, time_frames = f0_values.shape
         freq_bins = target_spectrogram.shape[-1]
-        
+
         log_target_spec = torch.log(torch.clamp(target_spectrogram, min=1e-6))
         spectral_envelope = torch.exp(lag_window_spectral_envelope(
-            log_target_spec, 
+            log_target_spec,
             window_size=self.predictor.pitch_guide_generator.window_size
         ))
-        
+
         # BAP -> aperiodicity変換
         if bap.shape[-1] != freq_bins:
             bap_upsampled = F.interpolate(
@@ -276,13 +260,34 @@ class Model(nn.Module):
         else:
             bap_upsampled = bap
         aperiodicity = torch.sigmoid(bap_upsampled)
-        
-        # V/UV Detector使用でV/UVマスク生成
-        _, _, v_continuous, vuv_mask = self.predictor.detect_vuv(
+
+        # V/UV Detector使用でV/UVマスク生成（L_pseudo用）
+        _, _, _, vuv_mask = self.predictor.detect_vuv(
             spectral_envelope=spectral_envelope,
             aperiodicity=aperiodicity,
         )
+
+        # BAP損失（BAPレベルでの簡易V/UV判定）
+        # FIXME: BAP損失の循環参照問題 - 重要度：高
+        # 1. BAP予測値(bap)を使ってBAP損失ターゲット(bap_target)を生成している
+        # 2. 学習初期にbap予測値が不安定でV/UV判定精度が悪化する可能性
+        # 3. より独立したV/UV判定基準（target_f0やスペクトル特徴）への変更が必要
+        # 4. 現在の実装は論文準拠ではなく、暫定的な解決策
+        bap_mean = torch.mean(torch.sigmoid(bap), dim=-1)  # (B, T)
         
+        # FIXME: BAP V/UVしきい値のハードコーディング - 重要度：高
+        # 1. しきい値0.5が固定値でNetworkConfig等への移行が必要
+        # 2. 論文準拠の動的しきい値や学習可能パラメータの検討
+        # 3. データセット特性に応じた最適値の調整が必要
+        bap_voiced_mask = bap_mean < 0.5  # 低aperiodicity = 有声音
+
+        bap_target = torch.where(
+            bap_voiced_mask.unsqueeze(-1),
+            torch.zeros_like(bap),  # 有声音: 0に近く
+            torch.ones_like(bap),  # 無声音: 1に近く
+        )
+        loss_bap = huber_loss(bap, bap_target)
+
         # L_pseudo損失計算
         loss_pseudo = pseudo_spectrogram_loss(
             pseudo_spectrogram=pseudo_spectrogram,
@@ -300,8 +305,10 @@ class Model(nn.Module):
         )
         
         # L_recon損失計算
-        # FIXME: GED α パラメータ（現在0.1）が他の損失重みとのバランス未検証
-        # 論文値をそのまま使用しているが、実装特有の調整が必要な可能性
+        # FIXME: GED α パラメータのバランス検証 - 重要度：中  
+        # 1. 現在のged_alpha=0.1は論文値だが実装特有の調整が未検証
+        # 2. 他の損失重みとのバランス調整が必要な可能性
+        # 3. 学習安定性への影響・収束速度への影響が未確認
         loss_recon = reconstruction_loss(
             generated_spec_1=generated_spec_1,
             generated_spec_2=generated_spec_2,
