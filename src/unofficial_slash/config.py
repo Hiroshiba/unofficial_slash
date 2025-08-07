@@ -85,7 +85,7 @@ class ModelConfig(BaseModel):
     ged_alpha: float
     epsilon: float
     huber_delta: float  # Pitch Consistency Loss用のHuber損失デルタ
-    
+
     # F0境界値
     f0_min: float  # 人間の音声の最低F0 (Hz)
     f0_max: float  # 人間の音声の最高F0 (Hz)

@@ -104,7 +104,8 @@ class PseudoSpectrogramGenerator(nn.Module):
             spectral_envelope: スペクトル包絡 H (B, T, K)
             aperiodicity: 非周期性 A (B, T, K)
 
-        Returns:
+        Returns
+        -------
             Pseudo Spectrogram S* (B, T, K)
         """
         batch_size, time_frames = f0_values.shape
@@ -132,9 +133,7 @@ class PseudoSpectrogramGenerator(nn.Module):
 
         # Pseudo Spectrogram: S* = (E*_p ⊙ H ⊙ (1 - A)) + (F(e_ap) ⊙ H ⊙ A)
         # 現段階では周期成分のみ（非周期成分 F(e_ap) は Phase 4b で実装予定）
-        periodic_component = (
-            pseudo_excitation * spectral_envelope * (1 - aperiodicity)
-        )
+        periodic_component = pseudo_excitation * spectral_envelope * (1 - aperiodicity)
 
         # FIXME: 非周期成分 F(e_ap) の実装は Phase 4b (DDSP Synthesizer) で実装
         # 現在は周期成分のみを返す

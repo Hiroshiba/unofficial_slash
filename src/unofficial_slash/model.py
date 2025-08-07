@@ -9,7 +9,10 @@ from torch.nn.functional import huber_loss
 
 from unofficial_slash.batch import BatchOutput
 from unofficial_slash.config import ModelConfig
-from unofficial_slash.network.dsp.fine_structure import fine_structure_spectrum, lag_window_spectral_envelope
+from unofficial_slash.network.dsp.fine_structure import (
+    fine_structure_spectrum,
+    lag_window_spectral_envelope,
+)
 from unofficial_slash.network.predictor import Predictor
 from unofficial_slash.utility.train_utility import DataNumProtocol
 
@@ -244,18 +247,20 @@ class Model(nn.Module):
         freq_bins = target_spectrogram.shape[-1]
 
         log_target_spec = torch.log(torch.clamp(target_spectrogram, min=1e-6))
-        spectral_envelope = torch.exp(lag_window_spectral_envelope(
-            log_target_spec,
-            window_size=self.predictor.pitch_guide_generator.window_size
-        ))
+        spectral_envelope = torch.exp(
+            lag_window_spectral_envelope(
+                log_target_spec,
+                window_size=self.predictor.pitch_guide_generator.window_size,
+            )
+        )
 
         # BAP -> aperiodicity変換
         if bap.shape[-1] != freq_bins:
             bap_upsampled = F.interpolate(
                 bap.transpose(1, 2),  # (B, bap_bins, T)
                 size=(freq_bins,),
-                mode='linear',
-                align_corners=False
+                mode="linear",
+                align_corners=False,
             ).transpose(1, 2)  # (B, T, freq_bins)
         else:
             bap_upsampled = bap
@@ -274,7 +279,7 @@ class Model(nn.Module):
         # 3. より独立したV/UV判定基準（target_f0やスペクトル特徴）への変更が必要
         # 4. 現在の実装は論文準拠ではなく、暫定的な解決策
         bap_mean = torch.mean(torch.sigmoid(bap), dim=-1)  # (B, T)
-        
+
         # FIXME: BAP V/UVしきい値のハードコーディング - 重要度：高
         # 1. しきい値0.5が固定値でNetworkConfig等への移行が必要
         # 2. 論文準拠の動的しきい値や学習可能パラメータの検討
@@ -298,14 +303,16 @@ class Model(nn.Module):
 
         # L_recon損失 (GED) 計算
         # DDSP Synthesizerで2つの異なるスペクトログラムを生成
-        generated_spec_1, generated_spec_2 = self.predictor.ddsp_synthesizer.generate_two_spectrograms(
-            f0_values=f0_values,
-            spectral_envelope=spectral_envelope,
-            aperiodicity=aperiodicity,
+        generated_spec_1, generated_spec_2 = (
+            self.predictor.ddsp_synthesizer.generate_two_spectrograms(
+                f0_values=f0_values,
+                spectral_envelope=spectral_envelope,
+                aperiodicity=aperiodicity,
+            )
         )
-        
+
         # L_recon損失計算
-        # FIXME: GED α パラメータのバランス検証 - 重要度：中  
+        # FIXME: GED α パラメータのバランス検証 - 重要度：中
         # 1. 現在のged_alpha=0.1は論文値だが実装特有の調整が未検証
         # 2. 他の損失重みとのバランス調整が必要な可能性
         # 3. 学習安定性への影響・収束速度への影響が未確認
