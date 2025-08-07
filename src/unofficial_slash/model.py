@@ -272,24 +272,20 @@ class Model(nn.Module):
             aperiodicity=aperiodicity,
         )
 
-        # BAP損失（BAPレベルでの簡易V/UV判定）
-        # FIXME: BAP損失の循環参照問題 - 重要度：高
-        # 1. BAP予測値(bap)を使ってBAP損失ターゲット(bap_target)を生成している
-        # 2. 学習初期にbap予測値が不安定でV/UV判定精度が悪化する可能性
-        # 3. より独立したV/UV判定基準（target_f0やスペクトル特徴）への変更が必要
-        # 4. 現在の実装は論文準拠ではなく、暫定的な解決策
-        bap_mean = torch.mean(torch.sigmoid(bap), dim=-1)  # (B, T)
-
-        # FIXME: BAP V/UVしきい値のハードコーディング - 重要度：高
-        # 1. しきい値0.5が固定値でNetworkConfig等への移行が必要
-        # 2. 論文準拠の動的しきい値や学習可能パラメータの検討
-        # 3. データセット特性に応じた最適値の調整が必要
-        bap_voiced_mask = bap_mean < 0.5  # 低aperiodicity = 有声音
+        # BAP損失（target_f0ベースのV/UV判定で循環参照解消）
+        # FIXME: target_f0品質依存性 - 重要度：高
+        # 1. ground truthラベルの品質に直接依存する判定基準
+        # 2. MIR-1K歌声データでのF0=0境界値・V/UV判定の音響的妥当性要検証
+        # 3. より音響特徴量ベース（スペクトル特性等）の独立判定基準検討余地
+        # 4. 学習時target_f0使用・推論時未使用の設計不整合による性能影響未検証
+        # 5. BAP損失特性変更に伴う損失重みw_bap最適化の必要性検討
+        # target_f0 > 0で有声音判定（独立した判定基準）
+        voiced_mask_target = target_f0 > 0  # (B, T)
 
         bap_target = torch.where(
-            bap_voiced_mask.unsqueeze(-1),
-            torch.zeros_like(bap),  # 有声音: 0に近く
-            torch.ones_like(bap),  # 無声音: 1に近く
+            voiced_mask_target.unsqueeze(-1),
+            torch.zeros_like(bap),  # 有声音: 低aperiodicity(0に近く)
+            torch.ones_like(bap),  # 無声音: 高aperiodicity(1に近く)
         )
         loss_bap = huber_loss(bap, bap_target)
 
