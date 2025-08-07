@@ -55,13 +55,17 @@ network:
   vuv_threshold: 0.5
 
 model:
-  # 損失重み
+  # 基本損失重み
   w_cons: 10.0
   w_guide: 1.0
   w_pseudo: 10.0
   w_recon: 5.0
-  w_aug: 1.0
   w_bap: 0.1  # Band Aperiodicity損失重み
+
+  # ノイズロバスト損失重み (SLASH論文 Section 2.6)
+  w_aug: 1.0      # L_aug: 拡張データでの基本損失重み
+  w_g_aug: 1.0    # L_g-aug: 拡張データでのPitch Guide損失重み
+  w_ap: 1.0       # L_ap: Aperiodicity一貫性損失重み
   
   # 損失パラメータ
   hinge_margin: 0.5
@@ -72,6 +76,11 @@ model:
   # F0境界値
   f0_min: 20.0    # 人間の音声の最低F0 (Hz)
   f0_max: 2000.0  # 人間の音声の最高F0 (Hz)
+
+  # ノイズロバスト化設定 (SLASH論文 Section 2.6)
+  noise_snr_db_min: -6.0   # 最大ノイズレベル (SNR dB) - 論文準拠
+  noise_snr_db_max: 20.0   # 最小ノイズレベル (SNR dB)
+  volume_change_db_range: 6.0  # 音量変更範囲 (±dB) - 論文準拠
 
 train:
   batch_size: 17

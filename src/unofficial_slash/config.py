@@ -75,13 +75,17 @@ class NetworkConfig(BaseModel):
 class ModelConfig(BaseModel):
     """SLASH 損失関数の設定"""
 
-    # 損失重み
+    # 基本損失重み
     w_cons: float
     w_guide: float
     w_pseudo: float
     w_recon: float
-    w_aug: float
     w_bap: float
+
+    # ノイズロバスト損失重み (SLASH論文 Section 2.6)
+    w_aug: float  # L_aug: 拡張データでの基本損失重み
+    w_g_aug: float  # L_g-aug: 拡張データでのPitch Guide損失重み
+    w_ap: float  # L_ap: Aperiodicity一貫性損失重み
 
     # 損失パラメータ
     hinge_margin: float
@@ -92,6 +96,11 @@ class ModelConfig(BaseModel):
     # F0境界値
     f0_min: float  # 人間の音声の最低F0 (Hz)
     f0_max: float  # 人間の音声の最高F0 (Hz)
+
+    # ノイズロバスト化設定 (SLASH論文 Section 2.6)
+    noise_snr_db_min: float  # 最大ノイズレベル (SNR dB)
+    noise_snr_db_max: float  # 最小ノイズレベル (SNR dB)
+    volume_change_db_range: float  # 音量変更範囲 (±dB)
 
 
 class TrainConfig(BaseModel):

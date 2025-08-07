@@ -24,16 +24,17 @@ class ModelOutput(DataNumProtocol):
     loss: Tensor
     """逆伝播させる損失"""
 
-    # Phase 2-3: SLASH損失項目
+    # 基本SLASH損失項目
     loss_cons: Tensor  # Pitch Consistency Loss (L_cons)
-    loss_bap: Tensor  # Band Aperiodicity Loss (暫定MSE)
+    loss_bap: Tensor  # Band Aperiodicity Loss
     loss_guide: Tensor  # Pitch Guide Loss (L_guide)
-
-    # Phase 4a: Pseudo Spectrogram Loss追加
     loss_pseudo: Tensor  # Pseudo Spectrogram Loss (L_pseudo)
-
-    # Phase 4b: Reconstruction Loss (GED) 追加
     loss_recon: Tensor  # Reconstruction Loss (L_recon, GED)
+
+    # ノイズロバスト損失項目 (SLASH論文 Section 2.6)
+    loss_aug: Tensor  # L_aug: 拡張データでの基本損失
+    loss_g_aug: Tensor  # L_g-aug: 拡張データでのPitch Guide損失
+    loss_ap: Tensor  # L_ap: Aperiodicity一貫性損失
 
 
 def pitch_consistency_loss(
@@ -136,6 +137,65 @@ def reconstruction_loss(
     return ged_loss
 
 
+def apply_noise_augmentation(
+    audio: Tensor,  # (B, L) 音声信号
+    snr_db_min: float,  # 最小SNR (dB)
+    snr_db_max: float,  # 最大SNR (dB)
+) -> Tensor:
+    """ノイズ付加による音声拡張 - SLASH論文 Section 2.6"""
+    batch_size, audio_length = audio.shape
+    device = audio.device
+
+    # バッチごとにランダムなSNRを設定
+    snr_db = (
+        torch.rand(batch_size, device=device) * (snr_db_max - snr_db_min) + snr_db_min
+    )  # (B,)
+    snr_linear = 10.0 ** (snr_db / 10.0)  # (B,)
+
+    # 白色ノイズ生成
+    noise = torch.randn_like(audio)  # (B, L)
+
+    # 音声信号の電力計算
+    audio_power = torch.mean(audio**2, dim=1, keepdim=True)  # (B, 1)
+    noise_power = torch.mean(noise**2, dim=1, keepdim=True)  # (B, 1)
+
+    # 数値安定性のための小さな値を加算
+    eps = 1e-8
+    audio_power = torch.clamp(audio_power, min=eps)
+    noise_power = torch.clamp(noise_power, min=eps)
+
+    # SNRに基づいてノイズレベル調整
+    noise_scale = torch.sqrt(
+        audio_power / (snr_linear.unsqueeze(1) * noise_power)
+    )  # (B, 1)
+    scaled_noise = noise * noise_scale  # (B, L)
+
+    # ノイズを追加した音声
+    augmented_audio = audio + scaled_noise
+
+    return augmented_audio
+
+
+def apply_volume_augmentation(
+    audio: Tensor,  # (B, L) 音声信号
+    volume_change_db_range: float,  # 音量変更範囲 (±dB)
+) -> Tensor:
+    """音量変更による音声拡張 - SLASH論文 Section 2.6"""
+    batch_size = audio.shape[0]
+    device = audio.device
+
+    # バッチごとにランダムな音量変更 [-volume_change_db_range, +volume_change_db_range]
+    volume_change_db = (
+        (torch.rand(batch_size, device=device) - 0.5) * 2.0 * volume_change_db_range
+    )  # (B,)
+    volume_scale = 10.0 ** (volume_change_db / 20.0)  # (B,) dB -> linear scale
+
+    # 音量調整
+    augmented_audio = audio * volume_scale.unsqueeze(1)  # (B, L)
+
+    return augmented_audio
+
+
 class Model(nn.Module):
     """学習モデルクラス"""
 
@@ -157,9 +217,7 @@ class Model(nn.Module):
             _,  # f0_probs_shifted - Phase 4b以降で使用予定
             f0_values_shifted,  # (B, T)
             _,  # bap_shifted - Phase 4b以降で使用予定
-        ) = self.predictor.forward_with_shift(
-            batch.audio, batch.pitch_shift_semitones
-        )
+        ) = self.predictor.forward_with_shift(batch.audio, batch.pitch_shift_semitones)
 
         # Pitch Consistency Loss (L_cons) - SLASH論文 Equation (1)
         loss_cons = pitch_consistency_loss(
@@ -285,13 +343,105 @@ class Model(nn.Module):
             window_size=self.predictor.pitch_guide_generator.window_size,
         )
 
-        # SLASH損失の重み付き合成（L_recon追加）
+        # ========================================
+        # ノイズロバスト損失計算 (SLASH論文 Section 2.6)
+        # FIXME: ノイズロバスト学習の計算効率問題 - 重要度：高
+        # 1. 元データ + 拡張データで2回推論するため学習時間が約2倍に増大
+        # 2. メモリ使用量も拡張データ分増加（大規模バッチでOOMリスク）
+        # 3. 論文準拠だが実用性とのトレードオフ検討が必要
+        # ========================================
+
+        # 1. ノイズ付加・音量変更による音声拡張
+        # C_aug = CQT(w_aug) where w_aug は ノイズ付加+音量変更された音声
+        audio_aug_noise = apply_noise_augmentation(
+            batch.audio,
+            snr_db_min=self.model_config.noise_snr_db_min,
+            snr_db_max=self.model_config.noise_snr_db_max,
+        )
+        audio_aug_volume = apply_volume_augmentation(
+            audio_aug_noise,  # ノイズ付加後に音量変更（論文準拠）
+            volume_change_db_range=self.model_config.volume_change_db_range,
+        )
+
+        # 2. 拡張データでの推論: p_aug, P_aug, A_aug を取得
+        f0_probs_aug, f0_values_aug, bap_aug = self.predictor(audio_aug_volume)
+
+        # 3. L_aug損失: p と p_aug のHuber損失 (論文 Section 2.6)
+        # "The first loss L_aug is similar to L_cons, which is defined as the Huber norm between p and p_aug"
+        loss_aug = huber_loss(
+            f0_values, f0_values_aug, delta=self.model_config.huber_delta
+        )
+
+        # 4. L_g-aug損失: 拡張データでのPitch Guide損失 (論文 Section 2.6)
+        # "The second loss L_g-aug is almost the same as L_g, except that P is substituted with P_aug"
+        pitch_guide_aug = self.predictor.pitch_guide_generator(audio_aug_volume)
+        loss_g_aug = pitch_guide_loss(
+            f0_probs=f0_probs_aug,
+            pitch_guide=pitch_guide_aug,
+            hinge_margin=self.model_config.hinge_margin,
+        )
+
+        # 5. L_ap損失: ||log(A_aug) - log(A)||_1 (論文 Equation after line 391)
+        # FIXME: BAP次元統一処理の複雑さ - 重要度：中
+        # 1. BAP -> Aperiodicity変換での複雑な次元統一処理が必要
+        # 2. 周波数ビン数不一致時の補間処理が煩雑
+        # 3. より効率的なBAP設計への変更検討余地
+        # BAP -> Aperiodicityの変換が必要
+        if bap.shape[-1] != bap_aug.shape[-1]:
+            # BAP次元の統一処理
+            freq_bins = target_spectrogram.shape[-1]
+            if bap.shape[-1] != freq_bins:
+                bap_upsampled = F.interpolate(
+                    bap.transpose(1, 2),
+                    size=(freq_bins,),
+                    mode="linear",
+                    align_corners=False,
+                ).transpose(1, 2)
+            else:
+                bap_upsampled = bap
+            if bap_aug.shape[-1] != freq_bins:
+                bap_aug_upsampled = F.interpolate(
+                    bap_aug.transpose(1, 2),
+                    size=(freq_bins,),
+                    mode="linear",
+                    align_corners=False,
+                ).transpose(1, 2)
+            else:
+                bap_aug_upsampled = bap_aug
+        else:
+            bap_upsampled = bap
+            bap_aug_upsampled = bap_aug
+
+        # BAP -> Aperiodicity変換
+        aperiodicity_original = torch.sigmoid(bap_upsampled)
+        aperiodicity_aug = torch.sigmoid(bap_aug_upsampled)
+
+        # 数値安定性のため小さな値を加算してから対数を取る
+        # FIXME: 数値安定性の精度検証 - 重要度：低
+        # 1. sigmoid -> log変換でのeps=1e-8が適切かの検証
+        # 2. aperiodicity値の実際の分布範囲での安定性確認
+        # 3. より堅牢な対数変換手法の検討余地
+        eps = 1e-8
+        log_ap_original = torch.log(aperiodicity_original + eps)
+        log_ap_aug = torch.log(aperiodicity_aug + eps)
+
+        # L_ap = ||log(A_aug) - log(A)||_1
+        loss_ap = torch.mean(torch.abs(log_ap_aug - log_ap_original))
+
+        # 全SLASH損失の重み付き合成（ノイズロバスト損失追加）
+        # FIXME: 損失重みバランス調整の必要性 - 重要度：中
+        # 1. ノイズロバスト損失3種追加により全体の損失バランスが変化
+        # 2. 論文重み設定をベースにしているが実装特有の調整が必要な可能性
+        # 3. 学習安定性・収束速度への影響要検証（特にw_aug, w_g_aug, w_ap）
         total_loss = (
             self.model_config.w_cons * loss_cons
             + self.model_config.w_bap * loss_bap
             + self.model_config.w_guide * loss_guide
             + self.model_config.w_pseudo * loss_pseudo
             + self.model_config.w_recon * loss_recon
+            + self.model_config.w_aug * loss_aug
+            + self.model_config.w_g_aug * loss_g_aug
+            + self.model_config.w_ap * loss_ap
         )
 
         return ModelOutput(
@@ -301,5 +451,8 @@ class Model(nn.Module):
             loss_guide=loss_guide,
             loss_pseudo=loss_pseudo,
             loss_recon=loss_recon,
+            loss_aug=loss_aug,
+            loss_g_aug=loss_g_aug,
+            loss_ap=loss_ap,
             data_num=batch.data_num,
         )
