@@ -264,7 +264,7 @@ class Predictor(nn.Module):
         return self.vuv_detector(spectral_envelope, aperiodicity)
 
 
-def create_predictor(network_config: NetworkConfig, sample_rate: int) -> Predictor:
+def create_predictor(network_config: NetworkConfig) -> Predictor:
     """設定からPredictorを作成（SLASH用Pitch Encoderに最適化）"""
     # SLASH用に最適化されたConformerパラメータ
     dropout_rate = 0.1
@@ -298,5 +298,5 @@ def create_predictor(network_config: NetworkConfig, sample_rate: int) -> Predict
         speaker_size=1,  # ダミー話者（SLASH未使用）
         speaker_embedding_size=speaker_embedding_size,
         encoder=encoder,
-        sample_rate=sample_rate,
+        sample_rate=network_config.sample_rate,
     )

@@ -35,9 +35,6 @@ class ModelOutput(DataNumProtocol):
     # Phase 4b: Reconstruction Loss (GED) 追加
     loss_recon: Tensor  # Reconstruction Loss (L_recon, GED)
 
-    # 評価指標
-    f0_mae: Tensor  # F0のMAE
-
 
 def pitch_consistency_loss(
     f0_original: Tensor,  # (B, T) 元のF0値
@@ -137,23 +134,6 @@ def reconstruction_loss(
     ged_loss = attraction_term - ged_alpha * repulsion_term
 
     return ged_loss
-
-
-def f0_mean_absolute_error(
-    pred_f0: Tensor,  # (B, T) 予測F0値
-    target_f0: Tensor,  # (B, T) ターゲットF0値
-    f0_min: float,  # F0最小値
-    f0_max: float,  # F0最大値
-) -> Tensor:
-    """F0のMAE（Mean Absolute Error）を計算"""
-    with torch.no_grad():
-        # 設定値による有効なF0値の範囲を限定
-        valid_mask = (target_f0 >= f0_min) & (target_f0 <= f0_max)
-        if valid_mask.sum() > 0:
-            mae = torch.abs(pred_f0[valid_mask] - target_f0[valid_mask]).mean()
-        else:
-            mae = torch.tensor(0.0, device=target_f0.device, dtype=pred_f0.dtype)
-        return mae
 
 
 class Model(nn.Module):
@@ -329,14 +309,6 @@ class Model(nn.Module):
             + self.model_config.w_recon * loss_recon
         )
 
-        # 評価指標計算
-        f0_mae = f0_mean_absolute_error(
-            pred_f0=f0_values,
-            target_f0=target_f0,
-            f0_min=self.model_config.f0_min,
-            f0_max=self.model_config.f0_max,
-        )
-
         return ModelOutput(
             loss=total_loss,
             loss_cons=loss_cons,
@@ -344,6 +316,5 @@ class Model(nn.Module):
             loss_guide=loss_guide,
             loss_pseudo=loss_pseudo,
             loss_recon=loss_recon,
-            f0_mae=f0_mae,
             data_num=batch.data_num,
         )

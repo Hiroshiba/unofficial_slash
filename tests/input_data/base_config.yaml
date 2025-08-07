@@ -18,6 +18,9 @@ dataset:
   pitch_shift_range: 14
 
 network:
+  # 基本設定
+  sample_rate: 24000
+  
   # Pitch Encoder 設定
   f0_bins: 1024
   bap_bins: 8

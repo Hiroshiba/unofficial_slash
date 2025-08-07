@@ -35,6 +35,9 @@ class DatasetConfig(BaseModel):
 class NetworkConfig(BaseModel):
     """SLASH Pitch Encoder ネットワークの設定"""
 
+    # 基本設定
+    sample_rate: int
+
     # Pitch Encoder 設定
     f0_bins: int
     bap_bins: int

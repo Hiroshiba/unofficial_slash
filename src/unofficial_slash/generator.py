@@ -17,9 +17,9 @@ TensorLike = Tensor | numpy.ndarray
 class GeneratorOutput:
     """生成したデータ"""
 
-    vector_output: Tensor  # (B, ?)
-    variable_output_list: list[Tensor]  # [(L, ?)]
-    scalar_output: Tensor  # (B,)
+    f0_values: Tensor  # (B, T)
+    f0_probs: Tensor  # (B, T, F)
+    bap_values: Tensor  # (B, T, bap_bins)
 
 
 def to_tensor(array: TensorLike, device: torch.device) -> Tensor:
@@ -56,35 +56,15 @@ class Generator(nn.Module):
         self.predictor = predictor.eval().to(self.device)
 
     @torch.no_grad()
-    def forward(
-        self,
-        *,
-        feature_vector: TensorLike,  # (B, ?)
-        feature_variable_list: list[TensorLike],  # [(vL, ?)]
-        speaker_id: TensorLike,  # (B,)
-    ) -> GeneratorOutput:
+    def forward(self, audio: TensorLike) -> GeneratorOutput:  # (B, L)
         """生成経路で推論する"""
+        audio_tensor = to_tensor(audio, self.device)
 
-        def _convert(
-            data: TensorLike | list[TensorLike],
-        ):
-            if isinstance(data, list):
-                return [to_tensor(item, self.device) for item in data]
-            else:
-                return to_tensor(data, self.device)
-
-        (
-            vector_output,  # (B, ?)
-            variable_output_list,  # [(L, ?)]
-            scalar_output,  # (B,)
-        ) = self.predictor(
-            feature_vector=_convert(feature_vector),
-            feature_variable_list=_convert(feature_variable_list),
-            speaker_id=_convert(speaker_id),
-        )
+        # PredictorでF0推定を実行
+        f0_probs, f0_values, bap_values = self.predictor(audio_tensor)
 
         return GeneratorOutput(
-            vector_output=vector_output,
-            variable_output_list=variable_output_list,
-            scalar_output=scalar_output,
+            f0_values=f0_values,
+            f0_probs=f0_probs,
+            bap_values=bap_values,
         )
