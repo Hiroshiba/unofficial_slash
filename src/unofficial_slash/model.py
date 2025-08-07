@@ -149,42 +149,29 @@ class Model(nn.Module):
         device = batch.audio.device
         target_f0 = batch.pitch_label  # (B, T)
 
-        # ピッチシフトがある場合（学習時）とない場合（評価時）で分岐
-        if torch.any(batch.pitch_shift_semitones != 0):
-            # 学習時: ピッチシフトありの場合
-            # forward_with_shift()を使用して一括処理
-            (
-                f0_probs,  # (B, T, ?)
-                f0_values,  # (B, T)
-                bap,  # (B, T, ?)
-                _,  # f0_probs_shifted - Phase 4b以降で使用予定
-                f0_values_shifted,  # (B, T)
-                _,  # bap_shifted - Phase 4b以降で使用予定
-            ) = self.predictor.forward_with_shift(
-                batch.audio, batch.pitch_shift_semitones
-            )
+        # forward_with_shift()を常に使用（学習専用の統一フロー）
+        (
+            f0_probs,  # (B, T, ?)
+            f0_values,  # (B, T)
+            bap,  # (B, T, ?)
+            _,  # f0_probs_shifted - Phase 4b以降で使用予定
+            f0_values_shifted,  # (B, T)
+            _,  # bap_shifted - Phase 4b以降で使用予定
+        ) = self.predictor.forward_with_shift(
+            batch.audio, batch.pitch_shift_semitones
+        )
 
-            # Pitch Consistency Loss (L_cons) - SLASH論文 Equation (1)
-            loss_cons = pitch_consistency_loss(
-                f0_original=f0_values,
-                f0_shifted=f0_values_shifted,
-                shift_semitones=batch.pitch_shift_semitones,
-                delta=self.model_config.huber_delta,
-                f0_min=self.model_config.f0_min,
-                f0_max=self.model_config.f0_max,
-            )
-        else:
-            # 評価時: ピッチシフトなし
-            # FIXME: 評価時バッチ処理の設計不整合 - 重要度：中
-            # 1. 評価時はshift=0でL_cons=0となり損失計算をスキップしている
-            # 2. 論文的にはshift=0でも一貫した損失計算を行うべき可能性
-            # 3. 学習時と評価時で処理フローが異なり、評価の妥当性に懸念
-            # 4. pitch_shift_semitones=0でもforward_with_shift()を使用すべきか検討要
-            # 5. 現在の実装では評価時のL_cons寄与が完全にゼロになる
-            f0_probs, f0_values, bap = self.predictor(batch.audio)
-            loss_cons = torch.tensor(0.0, device=device)
+        # Pitch Consistency Loss (L_cons) - SLASH論文 Equation (1)
+        loss_cons = pitch_consistency_loss(
+            f0_original=f0_values,
+            f0_shifted=f0_values_shifted,
+            shift_semitones=batch.pitch_shift_semitones,
+            delta=self.model_config.huber_delta,
+            f0_min=self.model_config.f0_min,
+            f0_max=self.model_config.f0_max,
+        )
 
-        # Pitch Guide生成とPitch Guide Loss (L_guide) 計算
+        # Pitch Guide生成とPitch Guide Loss (L_guide)
         pitch_guide = self.predictor.pitch_guide_generator(batch.audio)  # (B, T, F)
 
         loss_guide = pitch_guide_loss(
@@ -193,10 +180,8 @@ class Model(nn.Module):
             hinge_margin=self.model_config.hinge_margin,
         )
 
-        # Pseudo Spectrogram Loss (L_pseudo) 計算
-        device = batch.audio.device
-
-        # STFTでターゲットスペクトログラムを計算
+        # Pseudo Spectrogram Loss (L_pseudo)
+        # STFTでターゲットスペクトログラムを取得
         n_fft = self.predictor.network_config.pseudo_spec_n_fft
         hop_length = self.predictor.network_config.pseudo_spec_hop_length
 
@@ -269,7 +254,7 @@ class Model(nn.Module):
         )
         loss_bap = huber_loss(bap, bap_target)
 
-        # L_pseudo損失計算
+        # L_pseudo損失
         loss_pseudo = pseudo_spectrogram_loss(
             pseudo_spectrogram=pseudo_spectrogram,
             target_spectrogram=target_spectrogram,
@@ -277,7 +262,7 @@ class Model(nn.Module):
             window_size=self.predictor.pitch_guide_generator.window_size,
         )
 
-        # L_recon損失 (GED) 計算
+        # L_recon損失 (GED)
         # DDSP Synthesizerで2つの異なるスペクトログラムを生成
         generated_spec_1, generated_spec_2 = (
             self.predictor.ddsp_synthesizer.generate_two_spectrograms(
@@ -287,7 +272,7 @@ class Model(nn.Module):
             )
         )
 
-        # L_recon損失計算
+        # L_recon損失
         # FIXME: GED α パラメータのバランス検証 - 重要度：中
         # 1. 現在のged_alpha=0.1は論文値だが実装特有の調整が未検証
         # 2. 他の損失重みとのバランス調整が必要な可能性
