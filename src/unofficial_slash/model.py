@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import torch
 from torch import Tensor, nn
+from torch.nn import functional as F
 from torch.nn.functional import huber_loss
 
 from unofficial_slash.batch import BatchOutput
@@ -28,8 +29,8 @@ class ModelOutput(DataNumProtocol):
     # Phase 4a: Pseudo Spectrogram Loss追加
     loss_pseudo: Tensor  # Pseudo Spectrogram Loss (L_pseudo)
 
-    # Phase 4b以降で追加予定:
-    # loss_recon: Tensor  # Reconstruction Loss (L_recon, GED)
+    # Phase 4b: Reconstruction Loss (GED) 追加
+    loss_recon: Tensor  # Reconstruction Loss (L_recon, GED)
 
     # 評価指標
     f0_mae: Tensor  # F0のMAE
@@ -126,6 +127,46 @@ def pseudo_spectrogram_loss(
     return loss
 
 
+def reconstruction_loss(
+    generated_spec_1: Tensor,  # (B, T, K) 生成スペクトログラム S˜1
+    generated_spec_2: Tensor,  # (B, T, K) 生成スペクトログラム S˜2
+    target_spectrogram: Tensor,  # (B, T, K) ターゲットスペクトログラム S
+    ged_alpha: float,  # GEDの反発項重み α
+    window_size: int,  # Fine structure spectrum用の窓サイズ
+) -> Tensor:
+    """
+    Reconstruction Loss (L_recon) - SLASH論文 Equation (8)
+    Generalized Energy Distance (GED)
+
+    L_recon = ||ψ(S˜1) - ψ(S)||₁ - α ||ψ(S˜1) - ψ(S˜2)||₁
+
+    Args:
+        generated_spec_1: 1つ目の生成スペクトログラム S˜1 (B, T, K)
+        generated_spec_2: 2つ目の生成スペクトログラム S˜2 (B, T, K)
+        target_spectrogram: ターゲットスペクトログラム S (B, T, K)
+        ged_alpha: 反発項の重み α (論文では0.1)
+        window_size: Fine structure spectrum計算用の窓サイズ
+
+    Returns:
+        L_recon損失
+    """
+    # Fine structure spectrum計算: ψ(S˜1), ψ(S˜2), ψ(S)
+    psi_gen_1 = fine_structure_spectrum(generated_spec_1, window_size)  # (B, T, K)
+    psi_gen_2 = fine_structure_spectrum(generated_spec_2, window_size)  # (B, T, K)
+    psi_target = fine_structure_spectrum(target_spectrogram, window_size)  # (B, T, K)
+
+    # 第1項: ||ψ(S˜1) - ψ(S)||₁
+    attraction_term = torch.mean(torch.abs(psi_gen_1 - psi_target))
+
+    # 第2項: α ||ψ(S˜1) - ψ(S˜2)||₁ (反発項)
+    repulsion_term = torch.mean(torch.abs(psi_gen_1 - psi_gen_2))
+
+    # GED損失: attraction - α * repulsion
+    ged_loss = attraction_term - ged_alpha * repulsion_term
+
+    return ged_loss
+
+
 def f0_mean_absolute_error(
     pred_f0: Tensor,  # (B, T) 予測F0値
     target_f0: Tensor,  # (B, T) ターゲットF0値
@@ -206,8 +247,10 @@ class Model(nn.Module):
         device = batch.audio.device
         
         # STFTでターゲットスペクトログラムを計算
-        # FIXME: STFTとCQTの時間軸不整合問題 - hop_lengthが異なる場合の時間軸対応が不完全
-        # CQT(B,F,T)とSTFT(B,T,F)の次元順序が混在し、フレーム数が一致しない可能性
+        # FIXME: STFTとCQTの時間軸不整合問題 - Phase 4c で優先解決が必要
+        # 1. hop_lengthが異なる場合の時間軸対応が不完全
+        # 2. CQT(B,F,T)とSTFT(B,T,F)の次元順序が混在
+        # 3. フレーム数が一致しない可能性により学習が不安定になるリスク
         n_fft = self.predictor.pseudo_spec_generator.n_freq_bins * 2 - 2
         hop_length = self.predictor.cqt_transform.hop_length
         
@@ -237,12 +280,60 @@ class Model(nn.Module):
             window_size=self.predictor.pitch_guide_generator.window_size,
         )
 
-        # SLASH損失の重み付き合成（L_pseudo追加）
+        # L_recon損失 (GED) 計算
+        # ターゲットスペクトログラムからスペクトル包絡を推定
+        from unofficial_slash.network.dsp.fine_structure import lag_window_spectral_envelope
+        
+        batch_size, time_frames = f0_values.shape
+        freq_bins = target_spectrogram.shape[-1]
+        
+        # ターゲットスペクトログラムの対数を取ってスペクトル包絡を推定
+        log_target_spec = torch.log(target_spectrogram + 1e-8)
+        spectral_envelope = torch.exp(lag_window_spectral_envelope(
+            log_target_spec, 
+            window_size=self.predictor.pitch_guide_generator.window_size
+        ))
+        
+        # Band Aperiodicityを周波数軸に線形補間してaperiodicityを作成
+        # bap: (B, T, bap_bins) -> aperiodicity: (B, T, freq_bins)
+        if bap.shape[-1] != freq_bins:
+            bap_upsampled = F.interpolate(
+                bap.transpose(1, 2),  # (B, bap_bins, T)
+                size=(freq_bins,),
+                mode='linear',
+                align_corners=False
+            ).transpose(1, 2)  # (B, T, freq_bins)
+        else:
+            bap_upsampled = bap
+        
+        # aperiodicityをsigmoidで0-1範囲に正規化
+        aperiodicity = torch.sigmoid(bap_upsampled)
+        
+        # DDSP Synthesizerで2つの異なるスペクトログラムを生成
+        generated_spec_1, generated_spec_2 = self.predictor.ddsp_synthesizer.generate_two_spectrograms(
+            f0_values=f0_values,
+            spectral_envelope=spectral_envelope,
+            aperiodicity=aperiodicity,
+        )
+        
+        # L_recon損失計算
+        # FIXME: GED α パラメータ（現在0.1）が他の損失重みとのバランス未検証
+        # 論文値をそのまま使用しているが、実装特有の調整が必要な可能性
+        loss_recon = reconstruction_loss(
+            generated_spec_1=generated_spec_1,
+            generated_spec_2=generated_spec_2,
+            target_spectrogram=target_spectrogram,
+            ged_alpha=self.model_config.ged_alpha,
+            window_size=self.predictor.pitch_guide_generator.window_size,
+        )
+
+        # SLASH損失の重み付き合成（L_recon追加）
         total_loss = (
             self.model_config.w_cons * loss_cons
             + self.model_config.w_bap * loss_bap
             + self.model_config.w_guide * loss_guide
             + self.model_config.w_pseudo * loss_pseudo
+            + self.model_config.w_recon * loss_recon
         )
 
         # 評価指標計算
@@ -254,6 +345,7 @@ class Model(nn.Module):
             loss_bap=loss_bap,
             loss_guide=loss_guide,
             loss_pseudo=loss_pseudo,
+            loss_recon=loss_recon,
             f0_mae=f0_mae,
             data_num=batch.data_num,
         )

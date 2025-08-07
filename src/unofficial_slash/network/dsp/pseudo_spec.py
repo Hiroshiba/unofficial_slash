@@ -40,9 +40,11 @@ def triangle_wave_oscillator(
     f0_safe = torch.clamp(f0_values, min=1e-8)  # (B, T)
 
     # 位相計算: Φ_{t,k} = (f_s / (2 * p_t * K)) * k
-    # FIXME: 論文の位相計算式との完全一致が未検証
-    # 論文では Φ_{t,k} = (f_s / (2 * p_t * K)) * k だが、実際の三角波生成での時間進行が考慮されていない
-    # 時間tでの位相積算や連続性の処理が不完全
+    # FIXME: 三角波振動子の精度問題 - Phase 4c で検証必要
+    # 1. 論文の位相計算式との完全一致が未検証
+    # 2. 時間tでの位相積算や連続性の処理が不完全  
+    # 3. 実際の三角波生成での時間進行が考慮されていない
+    # 4. 論文 Equation (4-6) との厳密な対応確認が必要
     phase = (
         sample_rate
         / (2 * f0_safe.unsqueeze(-1) * n_freq_bins)

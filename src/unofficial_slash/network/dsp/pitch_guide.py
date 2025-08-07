@@ -157,9 +157,10 @@ class PitchGuideGenerator(nn.Module):
         device = waveform.device
         batch_size = waveform.shape[0]
 
-        # FIXME: STFTとCQTの周波数軸不整合問題
-        # PredictorではCQTを使用しているが、ここではSTFTを使用
-        # 周波数分解能や時間分解能の違いによる特徴不整合が生じる可能性
+        # FIXME: STFTとCQTの周波数軸不整合問題 - Phase 4c で解決必要
+        # 1. PredictorではCQTを使用しているが、ここではSTFTを使用
+        # 2. 周波数分解能や時間分解能の違いによる特徴不整合が生じる可能性  
+        # 3. 統一されたCQTベース処理への変更を検討すべき
         # STFTで振幅スペクトログラムを計算
         stft_result = torch.stft(
             waveform,

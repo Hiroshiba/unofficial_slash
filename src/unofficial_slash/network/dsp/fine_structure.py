@@ -35,9 +35,10 @@ def lag_window_spectral_envelope(
     # FFTサイズは周波数ビン数の2倍-2 (実数信号のため)
     fft_size = (freq_bins - 1) * 2
 
-    # FIXME: フレーム別処理の効率化とエラーハンドリング強化が必要
-    # 現在のループ処理は大きなバッチで非効率、ベクトル化を検討
-    # また、FFT処理でのNaN/Inf発生時の例外処理が不十分
+    # FIXME: フレーム別処理の効率化とエラーハンドリング強化が必要 - Phase 4c で最適化検討
+    # 1. 現在のループ処理は大きなバッチで非効率、ベクトル化を検討
+    # 2. FFT処理でのNaN/Inf発生時の例外処理が不十分
+    # 3. メモリ使用量の最適化が必要
     # 各フレームごとにケプストラム分析
     envelopes = []
 
@@ -90,8 +91,10 @@ def fine_structure_spectrum(
         Fine structure spectrum ψ(S) (B, T, K)
     """
     # 小さな値を加算してlog(0)を回避
-    # FIXME: 数値安定性の強化が必要 - より堅牢なNaN/Inf検出と処理
-    # 現在のeps=1e-8では極小値での精度問題や、入力に既にNaN/Infが含まれる場合の対処が不十分
+    # FIXME: 数値安定性の強化が必要 - Phase 4c で優先対応
+    # 1. 現在のeps=1e-8では極小値での精度問題が発生する可能性
+    # 2. 入力に既にNaN/Infが含まれる場合の対処が不十分
+    # 3. 極端なF0値・Aperiodicity値での処理安定化が必要
     eps = 1e-8
     log_spec = torch.log(amplitude_spectrogram + eps)
 

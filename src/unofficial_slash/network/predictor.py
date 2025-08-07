@@ -9,6 +9,7 @@ from torch.nn import functional as F
 
 from unofficial_slash.config import NetworkConfig
 from unofficial_slash.network.conformer.encoder import Encoder
+from unofficial_slash.network.dsp.ddsp_synthesizer import DDSPSynthesizer
 from unofficial_slash.network.dsp.pitch_guide import PitchGuideGenerator
 from unofficial_slash.network.dsp.pseudo_spec import PseudoSpectrogramGenerator
 from unofficial_slash.network.transformer.utility import make_non_pad_mask
@@ -118,6 +119,14 @@ class Predictor(nn.Module):
             sample_rate=sample_rate,
             n_freq_bins=network_config.pseudo_spec_n_fft // 2 + 1,  # STFTの周波数ビン数
             epsilon=network_config.pseudo_spec_epsilon,
+        )
+
+        # DDSP Synthesizer初期化
+        self.ddsp_synthesizer = DDSPSynthesizer(
+            sample_rate=sample_rate,
+            n_fft=network_config.pseudo_spec_n_fft,
+            hop_length=network_config.cqt_hop_length,
+            n_harmonics=16,  # ハーモニクス次数（論文値）
         )
 
         self.speaker_embedder = nn.Embedding(speaker_size, speaker_embedding_size)
