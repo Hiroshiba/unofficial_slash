@@ -299,7 +299,7 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 
 ## 実装優先順位 (**現在**: 汎用MLフレームワーク → SLASH専用に破壊的変更)
 
-### 🎯 **現在の状況** (2025-01-14 更新):
+### 🎯 **現在の状況**:
 - ✅ **基本構造完了**: src/, scripts/, tests/, pathlistシステム、Pydantic設定
 - ✅ **学習システム完了**: train.py, model.py, predictor.py (Conformer)
 - ✅ **データ処理部分完了**: dataset.py, CQT変換, MIR-1K対応
@@ -308,13 +308,13 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 
 ### 🔄 **SLASH実装フェーズ** (破壊的変更による段階的移行):
 
-**Phase 1: 基本修正・SLASH設定対応** ✅ **完了 (2025-08-06)**
+**Phase 1: 基本修正・SLASH設定対応** ✅
 1. **設定変更**: config.py を SLASH 用パラメータに変更
 2. **データ構造変更**: InputData, OutputData を SLASH 用に変更  
 3. **Predictor/Model変更**: SLASH用入出力・損失関数に変更
 4. **動作確認**: 基本コンポーネントのコンパイル・作成確認完了
 
-**Phase 2: 音声処理順序修正・Pitch Encoder実装** ✅ **完了 (2025-01-14)**
+**Phase 2: 音声処理順序修正・Pitch Encoder実装** ✅
 1. **🆕 論文準拠処理順序**: 音声→CQT→CQT空間シフト（論文準拠）✅
 2. **🆕 データ構造簡素化**: audio_shifted削除、GPU効率向上 ✅
 3. **🆕 Predictor設計改善**: forward_with_shift()とencode_cqt()実装 ✅
@@ -357,18 +357,18 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 
 ### 🎯 **次期実装計画**: SLASH専用化 (破壊的変更)
 
-#### Phase 1: 基本修正・SLASH設定移行 ✅ **完了 (2025-08-06)**
+#### Phase 1: 基本修正・SLASH設定移行 ✅
 **実装対象**: 現在のサンプルコードをSLASH用に適応
 
 **✅ 完了項目**:
-1. **config.py変更**: NetworkConfig → SLASH用パラメータ (cqt_bins, f0_bins等) **完了**
+1. **config.py変更**: NetworkConfig → SLASH用パラメータ (cqt_bins, f0_bins等)
    - DataFileConfig → audio_pathlist + pitch_label_pathlist (optional)
    - NetworkConfig → CQT設定 + Pitch Encoder設定
    - ModelConfig → SLASH損失関数パラメータ
-2. **base_config.yaml変更**: SLASH用設定ファイル **完了**
+2. **base_config.yaml変更**: SLASH用設定ファイル
    - CQT: 176 bins, 205 total, 32.70Hz, 24kHz
    - F0: 1024 bins, BAP: 8 bins, AdamW 0.0002
-3. **🆕 データ構造変更**: InputData, OutputData, BatchOutput → SLASH用データ構造 **完了**
+3. **🆕 データ構造変更**: InputData, OutputData, BatchOutput → SLASH用データ構造
    - InputData: audio + cqt + pitch_label
    - OutputData: cqt + pitch_label  
    - BatchOutput: cqt (B, T, ?) + pitch_label (B, T)
@@ -378,9 +378,9 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
    - 入力: cqt (B, T, ?) 出力: f0_probs (B, T, 1024), bap (B, T, 8)
 6. **🆕 Model.forward()変更**: SLASH用損失（暫定MSE損失）**完了**
    - Phase 1: loss_f0 + loss_bap の基本MSE損失
-7. **🆕 基本コンポーネントコンパイル確認**: **完了**
+7. **🆕 基本コンポーネントコンパイル確認**:
    - Config, Predictor, Model の作成・動作確認済み
-8. **🆕 パスリスト作成ツール実装**: **完了**
+8. **🆕 パスリスト作成ツール実装**:
    - scripts/create_pathlist.py - LibriTTS-R/MIR-1K対応、ファイル整合性チェック機能付き
 
 **⚠️ Phase 1 の制限事項（Phase 2で部分解決）**:
@@ -392,7 +392,7 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 **🔄 Phase 1 残り作業**:
 - 実際の学習ループ動作確認（パスリスト作成は完了済み）
 
-#### Phase 2: Pitch Encoder実装 🔄 **部分実装済み (2025-08-06)**
+#### Phase 2: Pitch Encoder実装 🔄 **部分実装済み**
 **実装対象**: SLASH相対ピッチ学習システム
 **✅ 完了実装**:
 1. **CQT変換**: STFTベース疑似CQT (dataset.py) ✅
@@ -433,45 +433,53 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 - GED損失の安定化手法
 - Dynamic batching の具体的制御方法
 
-### 🚀 **現在の実装状況** (2025-08-08 更新)
+### 🚀 **現在の実装状況**
 
-**Phase 1-9 進捗**: ✅ **完了** - SLASH論文核心機能実装完了  
-**Phase 10 進捗**: ✅ **完了** - SLASH用テストデータ生成・学習システム統合テスト完成
-**Phase 11 進捗**: ✅ **完了** - BAP次元不整合問題解決・VUVDetector統合完成
+**Phase 1-9 進捗**: ✅ - SLASH論文核心機能実装完了  
+**Phase 10 進捗**: ✅ - SLASH用テストデータ生成・学習システム統合テスト完成
+**Phase 11 進捗**: ✅ - BAP次元不整合問題解決・VUVDetector統合完成
+**Phase 12 進捗**: ✅ - 生成システムSLASH対応・test_e2e_generate修正完成
 
-**🎉 Phase 11 最終成果** (2025-08-08):
+**🎉 Phase 12 最終成果**:
+- ✅ **scripts/generate.py SLASH対応完了**: 汎用MLインターフェース→SLASH専用に完全移行
+- ✅ **test_e2e_generate エラー解決**: BatchOutput属性エラー完全修正
+- ✅ **F0推定結果保存機能実装**: npz形式での推定結果出力機能追加
+- ✅ **生成システム完全統合**: Generator-Predictor-BatchOutput チェーン動作確認済み
+- ⚠️ **新規実用性課題発見**: ファイル名対応・バッチ処理・評価連携の改善必要
+
+**🎉 Phase 11 最終成果**:
 - ✅ **BAP次元不整合エラー解決**: RuntimeError: size mismatch (513 vs 8) 完全解決
 - ✅ **BAP→aperiodicity変換実装**: 8次元→513次元の次元変換機能完成
 - ✅ **VUVDetector統合成功**: spectral_envelope (B,T,513) とaperiodicity (B,T,513) の形状一致実現
 - ✅ **線形補間手法採用**: F.interpolate + exp変換による論文準拠の対数振幅線形補間実装完成
 - ⚠️ **新規技術課題発見**: 時間軸不一致問題 (target_f0: 480 vs bap: 481 フレーム)
 
-**🎉 Phase 10 最終成果** (2025-08-08):
+**🎉 Phase 10 最終成果**:
 - ✅ **test_utils.py SLASH対応完了**: 汎用ML→SLASH用データ生成に完全移行
 - ✅ **SLASH用音声データ生成**: 24kHz WAV、可変長（1.2-3.6秒）、正弦波+ノイズ
 - ✅ **SLASH用ピッチラベル生成**: frame_rate=200Hz対応、F0値80-400Hz範囲
 - ✅ **学習システム統合問題解決**: TorchScript無効化、AdamW対応、バッチサイズ調整
 - ✅ **既存構造完全保持**: フォーク元互換性維持、test_train.py無変更で動作
 
-**🎉 Phase 9 最終成果** (2025-08-07):
+**🎉 Phase 9 最終成果**:
 - ✅ **ノイズロバスト損失3種実装完了**: L_aug（F0 Huber損失）, L_g-aug（拡張Pitch Guide損失）, L_ap（Aperiodicity対数差損失）
 - ✅ **論文完全準拠データ拡張**: 白色ノイズ付加（最大SNR -6dB）+ 音量変更（±6dB）実装
 - ✅ **設定システム統合**: ModelConfig・base_config.yamlにノイズロバスト設定追加
 - ✅ **数値安定性確保**: Aperiodicity対数変換での eps 処理・BAP次元統一処理実装
 
-**🎉 Phase 8 最終成果** (2025-08-07):
+**🎉 Phase 8 最終成果**:
 - ✅ **学習専用モデル確立**: model.pyから不要な評価ロジック完全削除・責務明確化
 - ✅ **統一フロー実現**: 常にforward_with_shift()を使用する一貫した処理フロー
 - ✅ **コード品質向上**: 約30行削除・条件分岐除去による保守性向上
 - ✅ **設計検証完了**: train.pyとの連携確認で適切な役割分担を確認
 
-**🎉 Phase 5b 最終成果** (2025-08-07):
+**🎉 Phase 5b 最終成果**:
 - ✅ **CQT-STFTフレーム数整合性確保**: フレーム数不一致時の明確エラー検出実装
 - ✅ **V/UV判定ロジック統一**: target_f0>0からV/UV Detector出力ベースに統一
 - ✅ **BAP損失改善**: V/UV判定とBAP損失の次元整合性問題を解決
 - ✅ **コーディング規約準拠**: 設計原則に従った「エラーを出す」アプローチの実装
 
-**🎉 Phase 5a 最終成果** (2025-01-15):
+**🎉 Phase 5a 最終成果**:
 - ✅ **時間軸不整合問題解決**: STFTとCQTパラメータを設定から統一取得
 - ✅ **ハードコーディング解消**: 全ての固定値を設定ファイルから取得
   - `n_harmonics`, `huber_delta`, `f0_min/max`を設定化
@@ -495,7 +503,7 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 - データフロー・テンソル形状の整合性確認済み
 - 実学習実行に向けた技術課題解決済み
 
-## 🚨 **現状の技術課題・未解決問題** (2025-08-08 更新)
+## 🚨 **現状の技術課題・未解決問題**
 
 ### **🔴 重要度：高（実学習実行への影響大）**
 - ✅ **BAP→aperiodicity次元変換問題**: ✅ **基本実装完成 (Phase 11 + 論文準拠化)**
@@ -538,6 +546,11 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 - ⚠️ **メモリ・計算効率**: 大規模バッチでの最適化が不完全
   - fine_structure_spectrum計算の最適化余地
   - DDSP Synthesizerでのフレーム重複処理効率化
+- ⚠️ **生成システムの実用性改善**: Phase 12で基本機能は完成、実用性向上が必要
+  - ファイル名問題: batch_xxxx.npzでは元データとの対応関係が不明
+  - バッチ処理問題: バッチサイズ>1時に複数サンプルが1ファイルに混在
+  - 評価連携問題: 保存されたF0推定結果と評価システムの統合方法が不明確
+  - データ不足問題: pitch_label等の評価用データが保存されていない
 
 ### **🟢 重要度：低（最適化・技術精度向上）**
 - ⚠️ **DSPアルゴリズム精度**:
@@ -548,7 +561,7 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
   - 現在はランダムシード差のみだが、より音響的に意味のある多様性が必要か検討
 - ⚠️ **数値安定性・境界値**: F0範囲（20Hz-2000Hz）での境界付近動作の詳細検証
 
-## 🎯 **次期実装優先順位** (Phase 11完了後 - 2025-08-08 更新)
+## 🎯 **次期実装優先順位** (Phase 12完了後 - 2025-01-16 更新)
 
 ### **🔴 高優先度** (実学習実行・性能向上のために重要)
 1. **❗️ 時間軸不整合の完全解決** - 他の損失関数でも同様の問題が潜在的に存在（部分修正のみ完了）
@@ -557,17 +570,18 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 4. **損失重みバランス再調整** - ノイズロバスト損失追加に伴う全体バランス最適化
 
 ### **🟡 中優先度** (機能完備・性能向上のために重要)  
-1. **BAP変換の細部最適化** - exp変換の数値安定性、対数vs線形周波数軸補間の適切性検証
-2. **Dynamic batching実装** - 可変長処理による効率化（平均バッチサイズ17対応）
-3. **STFTとCQTの周波数軸不整合問題解決** - pitch_guide.pyの統一処理
-4. **バッチ処理設計改善** - pitch_shift=0時の学習・評価処理統一
+1. **生成システム実用性改善** - Phase 12基本対応完了後の使い勝手向上
+2. **BAP変換の細部最適化** - exp変換の数値安定性、対数vs線形周波数軸補間の適切性検証
+3. **Dynamic batching実装** - 可変長処理による効率化（平均バッチサイズ17対応）
+4. **STFTとCQTの周波数軸不整合問題解決** - pitch_guide.pyの統一処理
+5. **バッチ処理設計改善** - pitch_shift=0時の学習・評価処理統一
 
 ### **🟢 低優先度** (最適化・発展機能)
 1. **DSPアルゴリズム精度向上** - 三角波振動子・SHS・最小位相応答の最適化
 2. **真のスペクトル包絡推定器実装** - 現在の暫定実装から本格実装への移行
 3. **メモリ・計算効率最適化** - 大規模バッチ・DDSP効率化・fine_structure最適化
 
-## 📈 **学習・評価準備状況** (2025-08-07 更新)
+## 📈 **学習・評価準備状況**
 
 ### ✅ **学習準備完了項目**
 - ✅ **SLASH核心損失8つの実装完了** (L_cons, L_guide, L_pseudo, L_recon, L_bap, L_aug, L_g-aug, L_ap)
@@ -581,6 +595,7 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 - ✅ **時間軸統一処理完了** (STFTとCQTパラメータの設定統一)
 - ✅ **Phase 8学習システム最適化** (model.py学習専用化・統一フロー・保守性向上)
 - ✅ **Phase 9ノイズロバスト完成** (L_aug・L_g-aug・L_ap損失・データ拡張システム)
+- ✅ **Phase 12生成システム完成** (scripts/generate.py SLASH対応・F0推定結果出力・推論チェーン統合)
 
 ### ✅ **Phase 6で解決済み**
 - ✅ **BAP損失循環参照問題** - target_f0ベースの独立V/UV判定に変更完了
@@ -597,7 +612,7 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 
 **結論**: **Phase 9完成により、SLASH論文実装の完全達成を達成**。ノイズロバスト学習実装により論文の全損失関数（8種）を実装完了し、論文準拠の堅牢性向上機能を実現。現在は本格学習・評価実行が可能な最適な状態で、残る課題は実学習用データ準備・Dynamic batching・計算効率最適化等の発展的改善。
 
-## 🆕 **Phase 7: 評価システム改修** ✅ **完了 (2025-08-07)**
+## 🆕 **Phase 7: 評価システム改修** ✅
 
 ### **Phase 7の背景**
 - train.pyでfor_eval時にModelではなくEvaluatorが使用されることを確認
@@ -637,7 +652,7 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 - ✅ **設計原則遵守**: 推論・評価経路の明確な分離実現
 - ✅ **実用性向上**: MIR-1K歌声データセットでの実際の評価実行準備完了
 
-## 🆕 **Phase 9: ノイズロバスト学習実装** ✅ **完了 (2025-08-07)**
+## 🆕 **Phase 9: ノイズロバスト学習実装** ✅
 
 ### **Phase 9の背景**
 - SLASH論文Section 2.6のノイズロバスト学習（L_aug, L_g-aug, L_ap損失）が未実装
@@ -675,7 +690,7 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 - ✅ **ロバスト性向上**: ノイズ環境での性能向上期待（論文では高いロバスト性を確認済み）
 - ✅ **実装完全性**: SLASH論文の全損失関数（8種）の実装達成
 
-## 🆕 **Phase 8: model.py学習専用化** ✅ **完了 (2025-08-07)**
+## 🆕 **Phase 8: model.py学習専用化** ✅
 
 ### **Phase 8の背景**
 - model.pyに不要な評価用分岐処理が存在することを発見
@@ -708,7 +723,7 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 - ✅ **保守性向上**: 不要な条件分岐除去によるコード簡素化
 - ✅ **設計一貫性**: 学習時・test評価時で統一されたフロー実現
 
-## 🆕 **Phase 12: 時間軸不整合問題対応** 🔄 **部分完了 (2025-01-16)**
+## 🆕 **Phase 12: 時間軸不整合問題対応** 🔄 **部分完了**
 
 ### **Phase 12の背景**
 - pytest実行時に `target_f0: (B, 480)` vs `bap: (B, 481, 8)` の1フレーム差でRuntimeError発生
@@ -739,7 +754,7 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 - ✅ **緊急問題解決**: RuntimeError解消によるテスト実行継続可能化
 - ✅ **防御的プログラミング**: 予期しないフレーム数差への堅牢な対処
 
-## 🚨 **Phase 7残存課題・検証項目** (2025-08-07)
+## 🚨 **Phase 7残存課題・検証項目**
 
 ### **🔴 高優先度検証項目**:
 1. **統合テスト未実施**: Evaluator-Generator-Predictorチェーンの実際の動作検証が必要

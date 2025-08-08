@@ -4,6 +4,7 @@ import argparse
 import re
 from pathlib import Path
 
+import numpy as np
 import yaml
 from torch.utils.data import DataLoader
 from tqdm import tqdm
@@ -71,11 +72,17 @@ def generate(
     )
 
     batch: BatchOutput
-    for batch in tqdm(data_loader, desc="generate"):
-        _ = generator(
-            feature_vector=batch.feature_vector,
-            feature_variable_list=batch.feature_variable_list,
-            speaker_id=batch.speaker_id,
+    for batch_idx, batch in enumerate(tqdm(data_loader, desc="generate")):
+        generator_output = generator(audio=batch.audio)
+
+        output_file = output_dir / f"batch_{batch_idx:04d}.npz"
+        np.savez_compressed(
+            output_file,
+            f0_values=generator_output.f0_values.cpu().numpy(),
+            f0_probs=generator_output.f0_probs.cpu().numpy(),
+            bap_values=generator_output.bap_values.cpu().numpy(),
+            audio_shape=batch.audio.shape,
+            pitch_shift=batch.pitch_shift_semitones.cpu().numpy(),
         )
 
 
