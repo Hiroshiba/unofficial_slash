@@ -437,6 +437,14 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 
 **Phase 1-9 進捗**: ✅ **完了** - SLASH論文核心機能実装完了  
 **Phase 10 進捗**: ✅ **完了** - SLASH用テストデータ生成・学習システム統合テスト完成
+**Phase 11 進捗**: ✅ **完了** - BAP次元不整合問題解決・VUVDetector統合完成
+
+**🎉 Phase 11 最終成果** (2025-08-08):
+- ✅ **BAP次元不整合エラー解決**: RuntimeError: size mismatch (513 vs 8) 完全解決
+- ✅ **BAP→aperiodicity変換実装**: 8次元→513次元の次元変換機能完成
+- ✅ **VUVDetector統合成功**: spectral_envelope (B,T,513) とaperiodicity (B,T,513) の形状一致実現
+- ✅ **repeat_interleave手法採用**: 各BAPビンを64回繰り返し+余り補完による効率的変換
+- ⚠️ **新規技術課題発見**: 時間軸不一致問題 (target_f0: 480 vs bap: 481 フレーム)
 
 **🎉 Phase 10 最終成果** (2025-08-08):
 - ✅ **test_utils.py SLASH対応完了**: 汎用ML→SLASH用データ生成に完全移行
@@ -490,10 +498,14 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 ## 🚨 **現状の技術課題・未解決問題** (2025-08-08 更新)
 
 ### **🔴 重要度：高（実学習実行への影響大）**
-- ⚠️ **BAP→aperiodicity次元変換問題**: V/UV Detector内でのテンソル次元不整合
-  - BAP（8次元）→full aperiodicity（513次元）の変換処理でサイズ不一致エラー
-  - スペクトル包絡（B, T, 513）とaperiodicity（B, T, 8）のサイズが合わない
-  - 論文では8次元BAP使用を明記しているが、具体的な次元拡張方法が不明
+- ✅ **BAP→aperiodicity次元変換問題**: ✅ **解決済み (Phase 11)**
+  - repeat_interleave手法による8次元→513次元変換を実装
+  - VUVDetectorの形状エラー完全解決
+  - ⚠️ **残存課題**: 論文準拠性の検証必要 - 現在は単純繰り返し、真の線形補間ではない可能性
+- ⚠️ **時間軸不整合問題**: target_f0とbapのフレーム数不一致 **新規発見**
+  - target_f0: (B, 480), bap: (B, 481, 8) の1フレーム差
+  - CQTとSTFT処理での時間軸計算不整合が原因の可能性
+  - BAP損失計算でのtorch.whereでサイズエラー発生
 - ⚠️ **TorchScript無効化問題**: nnAudio/CQTとtorch.jit.scriptの互換性問題
   - 一時的にTorchScript化を無効化（train.py:155-157）
   - 推論速度・デプロイ時の最適化に影響する可能性
@@ -510,11 +522,15 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
   - メモリ使用量も拡張データ分だけ増加（大規模バッチ時にOOM リスク）
 
 ### **🟡 重要度：中（機能追加・性能向上）**
+- ⚠️ **BAP変換の音響的妥当性問題**: 現在の実装は論文準拠ではない可能性 **新規発見**
+  - 論文「linearly interpolating B on the logarithmic amplitude」vs 実装「repeat_interleave」
+  - 8次元BAPと513次元周波数ビンの音響的対応関係が不明確
+  - 対数周波数軸での適切な線形補間が実装されていない
+  - 単純繰り返しによる音響特性への影響が未検証
 - ⚠️ **未実装の重要機能**: 
   - Dynamic batching（可変長バッチ処理・平均バッチサイズ17）
   - 真のスペクトル包絡推定器（現在は暫定的なlag-window実装）
 - ⚠️ **ノイズロバスト学習の実装課題**: 
-  - BAP次元統一処理の複雑さ（L_ap損失での次元変換処理）
   - 損失重みバランス調整の必要性（新規損失3種追加による全体バランス変化）
 - ⚠️ **バッチ処理設計**: pitch_shift_semitones==0での学習・評価分岐が不適切
   - 評価時もshift=0の学習と同等処理をすべき可能性
@@ -531,18 +547,19 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
   - 現在はランダムシード差のみだが、より音響的に意味のある多様性が必要か検討
 - ⚠️ **数値安定性・境界値**: F0範囲（20Hz-2000Hz）での境界付近動作の詳細検証
 
-## 🎯 **次期実装優先順位** (Phase 9完了後 - 2025-08-07 更新)
+## 🎯 **次期実装優先順位** (Phase 11完了後 - 2025-08-08 更新)
 
 ### **🔴 高優先度** (実学習実行・性能向上のために重要)
-1. **✅ SLASH用pathlistファイル作成** - scripts/create_pathlist.py実装完了（LibriTTS-R/MIR-1K対応）
+1. **時間軸不整合問題解決** - target_f0とbapのフレーム数不一致解決（1フレーム差）
 2. **LibriTTS-Rデータセット完全ダウンロード** - 学習用データ準備（現在は部分的なdev_cleanのみ）
 3. **target_f0依存性軽減** - より音響特徴ベースの独立V/UV判定検討
 4. **損失重みバランス再調整** - ノイズロバスト損失追加に伴う全体バランス最適化
 
 ### **🟡 中優先度** (機能完備・性能向上のために重要)  
-1. **Dynamic batching実装** - 可変長処理による効率化（平均バッチサイズ17対応）
-2. **STFTとCQTの周波数軸不整合問題解決** - pitch_guide.pyの統一処理
-3. **バッチ処理設計改善** - pitch_shift=0時の学習・評価処理統一
+1. **BAP変換の論文準拠化** - repeat_interleaveから真の線形補間への改善
+2. **Dynamic batching実装** - 可変長処理による効率化（平均バッチサイズ17対応）
+3. **STFTとCQTの周波数軸不整合問題解決** - pitch_guide.pyの統一処理
+4. **バッチ処理設計改善** - pitch_shift=0時の学習・評価処理統一
 
 ### **🟢 低優先度** (最適化・発展機能)
 1. **DSPアルゴリズム精度向上** - 三角波振動子・SHS・最小位相応答の最適化

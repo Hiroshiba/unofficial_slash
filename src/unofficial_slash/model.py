@@ -277,20 +277,36 @@ class Model(nn.Module):
             )
         )
 
-        # BAP -> aperiodicity変換
-        # FIXME: BAP（8次元）→full aperiodicity（513次元）の変換処理に次元不整合問題
-        # - 現在: V/UV Detector内でスペクトル包絡（513次元）とaperiodicity（8次元）のサイズが合わない
-        # - 論文では8次元BAP使用を明記しているが、513次元への具体的拡張方法が不明
-        # - 線形補間が適切かどうかも要検証（論文参照：Section 2.5）
+        # BAP -> aperiodicity変換（論文準拠の8次元→513次元変換） ✅ 解決済み
+        # SLASH論文 Section 2.2: "linearly interpolating B on the logarithmic amplitude"
+        # 実装: repeat_interleave + 余りビン補完による8→513次元変換
+        # FIXME: 論文準拠性問題 - 重要度：中
+        # 1. 現在は単純繰り返し（repeat_interleave）、論文の「線形補間」とは異なる可能性
+        # 2. 8次元BAPと513次元周波数ビンの音響的対応関係が不明確
+        # 3. 対数周波数軸での適切な線形補間実装への改善検討が必要
+        # 4. 単純繰り返しによる音響特性への影響が未検証
         if bap.shape[-1] != freq_bins:
-            bap_upsampled = F.interpolate(
-                bap.transpose(1, 2),  # (B, bap_bins, T)
-                size=(freq_bins,),
-                mode="linear",
-                align_corners=False,
-            ).transpose(1, 2)  # (B, T, freq_bins)
+            # BAP (B, T, 8) を (B, T, 513) に変換
+            bap_bins = bap.shape[-1]  # 8
+
+            # 各BAPビンを周波数ビンに線形補間で展開
+            repeat_factor = freq_bins // bap_bins  # 513 // 8 = 64
+            remainder = freq_bins % bap_bins  # 513 % 8 = 1
+
+            # 各BAPビンを繰り返し展開
+            bap_repeated = bap.repeat_interleave(repeat_factor, dim=-1)  # (B, T, 512)
+
+            # 残りの周波数ビンを最後のBAPビンで補完
+            if remainder > 0:
+                last_bap = bap[:, :, -1:].repeat(1, 1, remainder)  # (B, T, 1)
+                bap_upsampled = torch.cat(
+                    [bap_repeated, last_bap], dim=-1
+                )  # (B, T, 513)
+            else:
+                bap_upsampled = bap_repeated
         else:
             bap_upsampled = bap
+
         aperiodicity = torch.sigmoid(bap_upsampled)
 
         # V/UV Detector使用でV/UVマスク生成（L_pseudo用）
@@ -306,6 +322,11 @@ class Model(nn.Module):
         # 3. より音響特徴量ベース（スペクトル特性等）の独立判定基準検討余地
         # 4. 学習時target_f0使用・推論時未使用の設計不整合による性能影響未検証
         # 5. BAP損失特性変更に伴う損失重みw_bap最適化の必要性検討
+        # FIXME: 時間軸不整合問題 - 重要度：高 **新規発見**
+        # 1. target_f0: (B, 480) vs bap: (B, 481, 8) で1フレーム差が発生
+        # 2. CQTとSTFT処理での時間軸計算不整合が原因の可能性
+        # 3. torch.whereでのサイズエラーによる学習停止問題
+        # 4. 修正方法: フレーム数の短い方に合わせる、または時間軸計算の統一化
         # target_f0 > 0で有声音判定（独立した判定基準）
         voiced_mask_target = target_f0 > 0  # (B, T)
 

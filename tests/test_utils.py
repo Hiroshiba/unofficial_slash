@@ -58,24 +58,26 @@ def setup_data_and_config(base_config_path: Path, data_dir: Path) -> Config:
         stem = file_path.stem
         duration = audio_lengths[stem]
         sample_rate = config.dataset.sample_rate
-        
+
         # 音声サンプル数
         num_samples = int(duration * sample_rate)
         t = np.linspace(0, duration, num_samples, dtype=np.float32)
-        
+
         # 基本周波数（F0）をランダムに設定
         f0 = float(np.random.default_rng().uniform(100, 300))
-        
+
         # 正弦波生成
         audio_signal = 0.5 * np.sin(2 * np.pi * f0 * t)
-        
+
         # 白色ノイズ追加
-        noise = 0.1 * np.random.default_rng().normal(size=num_samples).astype(np.float32)
+        noise = 0.1 * np.random.default_rng().normal(size=num_samples).astype(
+            np.float32
+        )
         audio_signal += noise
-        
+
         # 16bit integer に変換
         audio_int16 = (audio_signal * 32767).astype(np.int16)
-        
+
         # WAVファイル保存
         scipy.io.wavfile.write(file_path, sample_rate, audio_int16)
 
@@ -86,15 +88,17 @@ def setup_data_and_config(base_config_path: Path, data_dir: Path) -> Config:
         stem = file_path.stem
         duration = audio_lengths[stem]
         frame_rate = config.dataset.frame_rate
-        
+
         # フレーム数計算
         num_frames = int(duration * frame_rate)
-        
+
         # F0値生成（80-400Hzの範囲）
         base_f0 = float(np.random.default_rng().uniform(100, 300))
-        f0_variation = np.random.default_rng().normal(0, 10, num_frames).astype(np.float32)
+        f0_variation = (
+            np.random.default_rng().normal(0, 10, num_frames).astype(np.float32)
+        )
         f0_values = np.clip(base_f0 + f0_variation, 80, 400)
-        
+
         # テキストファイルとして保存（1行1フレーム）
         with file_path.open("w") as f:
             for f0 in f0_values:
