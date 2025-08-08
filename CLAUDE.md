@@ -250,6 +250,37 @@ python scripts/download_libritts_train.py --skip-existing --parallel 16
 - 用途: SLASH モデルの学習のみ
 - **特徴**: 16並列ダウンロード対応、複数ミラーサーバー自動切り替え、レジューム機能
 
+### パスリスト作成（学習前必須）
+
+#### SLASH学習用パスリスト生成
+```bash
+# LibriTTS-R dev_cleanサブセットでのパスリスト作成
+uv run scripts/create_pathlist.py --dataset libritts-r --subset dev_clean
+
+# LibriTTS-R test_cleanサブセットでのパスリスト作成
+uv run scripts/create_pathlist.py --dataset libritts-r --subset test_clean
+
+# MIR-1K フルセットでのパスリスト作成  
+uv run scripts/create_pathlist.py --dataset mir1k
+
+# MIR-1K 評価サブセットでのパスリスト作成
+uv run scripts/create_pathlist.py --dataset mir1k --subset eval_250
+```
+
+**対応データセット**:
+- **LibriTTS-R**: dev_clean, test_clean, train_clean_100, train_clean_360, train_other_500等
+- **MIR-1K**: full（1,000クリップ）, eval_250（250クリップ相当のサブセット）
+
+**生成ファイル**:
+- `{dataset}_{subset}_audio_pathlist.txt`: 音声ファイルパス一覧
+- `{dataset}_{subset}_pitch_label_pathlist.txt`: ピッチラベルファイルパス一覧（MIR-1K時のみ）
+
+**特徴**:
+- ファイル整合性チェック機能付き（音声とピッチラベルの対応確認）
+- 相対パス形式での出力（train_dataset/からの相対パス）
+- 自動的な出力ディレクトリ作成（train_dataset/）
+- データセット構造の自動認識・検証機能
+
 ### 学習実行（LibriTTS-R使用）
 ```bash
 python train.py --dataset libritts-r --data_root ./train_dataset/libritts-r --max_steps 100000
@@ -349,6 +380,8 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
    - Phase 1: loss_f0 + loss_bap の基本MSE損失
 7. **🆕 基本コンポーネントコンパイル確認**: **完了**
    - Config, Predictor, Model の作成・動作確認済み
+8. **🆕 パスリスト作成ツール実装**: **完了**
+   - scripts/create_pathlist.py - LibriTTS-R/MIR-1K対応、ファイル整合性チェック機能付き
 
 **⚠️ Phase 1 の制限事項（Phase 2で部分解決）**:
 - ✅ **CQT変換**: STFTベース疑似CQT実装（完了）
@@ -357,8 +390,7 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 - ⚠️ **固定長前提**: パディング処理 → FIXME: Dynamic batching対応（未解決）
 
 **🔄 Phase 1 残り作業**:
-- テストデータ準備（pathlist作成）
-- 実際の学習ループ動作確認
+- 実際の学習ループ動作確認（パスリスト作成は完了済み）
 
 #### Phase 2: Pitch Encoder実装 🔄 **部分実装済み (2025-08-06)**
 **実装対象**: SLASH相対ピッチ学習システム
@@ -492,7 +524,7 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 ## 🎯 **次期実装優先順位** (Phase 9完了後 - 2025-08-07 更新)
 
 ### **🔴 高優先度** (実学習実行・性能向上のために重要)
-1. **SLASH用pathlistファイル作成** - audio_pathlist・pitch_label_pathlist準備（実学習に必須）
+1. **✅ SLASH用pathlistファイル作成** - scripts/create_pathlist.py実装完了（LibriTTS-R/MIR-1K対応）
 2. **LibriTTS-Rデータセット完全ダウンロード** - 学習用データ準備（現在は部分的なdev_cleanのみ）
 3. **target_f0依存性軽減** - より音響特徴ベースの独立V/UV判定検討
 4. **損失重みバランス再調整** - ノイズロバスト損失追加に伴う全体バランス最適化
