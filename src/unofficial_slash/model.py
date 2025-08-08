@@ -196,6 +196,29 @@ def apply_volume_augmentation(
     return augmented_audio
 
 
+def interpolate_bap_linear(bap: Tensor, freq_bins: int) -> Tensor:
+    """Band Aperiodicityを線形補間で周波数軸拡張"""
+    batch_size, time_steps, bap_bins = bap.shape
+    bap_flat = bap.view(-1, 1, bap_bins)
+
+    bap_interpolated = F.interpolate(
+        bap_flat,
+        size=freq_bins,
+        mode="linear",
+        align_corners=True,
+    )
+
+    return bap_interpolated.view(batch_size, time_steps, freq_bins)
+
+
+def bap_to_aperiodicity(bap_upsampled: Tensor) -> Tensor:
+    """BAPから線形振幅aperiodicityに変換（VUVDetector用）"""
+    # FIXME: exp変換の数値安定性 - 重要度：中
+    # 1. 対数振幅から線形振幅への変換でexpが適切だが発散の可能性
+    # 2. clampによる値域制限の必要性検討
+    return torch.exp(bap_upsampled)
+
+
 class Model(nn.Module):
     """学習モデルクラス"""
 
@@ -277,37 +300,12 @@ class Model(nn.Module):
             )
         )
 
-        # BAP -> aperiodicity変換（論文準拠の8次元→513次元変換） ✅ 解決済み
+        # BAP線形補間（論文準拠実装） ✅ 効率性最適化完了
         # SLASH論文 Section 2.2: "linearly interpolating B on the logarithmic amplitude"
-        # 実装: repeat_interleave + 余りビン補完による8→513次元変換
-        # FIXME: 論文準拠性問題 - 重要度：中
-        # 1. 現在は単純繰り返し（repeat_interleave）、論文の「線形補間」とは異なる可能性
-        # 2. 8次元BAPと513次元周波数ビンの音響的対応関係が不明確
-        # 3. 対数周波数軸での適切な線形補間実装への改善検討が必要
-        # 4. 単純繰り返しによる音響特性への影響が未検証
-        if bap.shape[-1] != freq_bins:
-            # BAP (B, T, 8) を (B, T, 513) に変換
-            bap_bins = bap.shape[-1]  # 8
+        bap_upsampled = interpolate_bap_linear(bap, freq_bins)
 
-            # 各BAPビンを周波数ビンに線形補間で展開
-            repeat_factor = freq_bins // bap_bins  # 513 // 8 = 64
-            remainder = freq_bins % bap_bins  # 513 % 8 = 1
-
-            # 各BAPビンを繰り返し展開
-            bap_repeated = bap.repeat_interleave(repeat_factor, dim=-1)  # (B, T, 512)
-
-            # 残りの周波数ビンを最後のBAPビンで補完
-            if remainder > 0:
-                last_bap = bap[:, :, -1:].repeat(1, 1, remainder)  # (B, T, 1)
-                bap_upsampled = torch.cat(
-                    [bap_repeated, last_bap], dim=-1
-                )  # (B, T, 513)
-            else:
-                bap_upsampled = bap_repeated
-        else:
-            bap_upsampled = bap
-
-        aperiodicity = torch.sigmoid(bap_upsampled)
+        # VUVDetector用のみ線形振幅変換
+        aperiodicity = bap_to_aperiodicity(bap_upsampled)
 
         # V/UV Detector使用でV/UVマスク生成（L_pseudo用）
         _, _, _, vuv_mask = self.predictor.detect_vuv(
@@ -332,10 +330,10 @@ class Model(nn.Module):
 
         bap_target = torch.where(
             voiced_mask_target.unsqueeze(-1),
-            torch.zeros_like(bap),  # 有声音: 低aperiodicity(0に近く)
-            torch.ones_like(bap),  # 無声音: 高aperiodicity(1に近く)
+            torch.zeros_like(bap_upsampled),  # 有声音: 低BAP(0に近く)
+            torch.ones_like(bap_upsampled),  # 無声音: 高BAP(1に近く)
         )
-        loss_bap = huber_loss(bap, bap_target)
+        loss_bap = huber_loss(bap_upsampled, bap_target)
 
         # L_pseudo損失
         loss_pseudo = pseudo_spectrogram_loss(
@@ -411,47 +409,13 @@ class Model(nn.Module):
         # 1. BAP -> Aperiodicity変換での複雑な次元統一処理が必要
         # 2. 周波数ビン数不一致時の補間処理が煩雑
         # 3. より効率的なBAP設計への変更検討余地
-        # BAP -> Aperiodicityの変換が必要
-        if bap.shape[-1] != bap_aug.shape[-1]:
-            # BAP次元の統一処理
-            freq_bins = target_spectrogram.shape[-1]
-            if bap.shape[-1] != freq_bins:
-                bap_upsampled = F.interpolate(
-                    bap.transpose(1, 2),
-                    size=(freq_bins,),
-                    mode="linear",
-                    align_corners=False,
-                ).transpose(1, 2)
-            else:
-                bap_upsampled = bap
-            if bap_aug.shape[-1] != freq_bins:
-                bap_aug_upsampled = F.interpolate(
-                    bap_aug.transpose(1, 2),
-                    size=(freq_bins,),
-                    mode="linear",
-                    align_corners=False,
-                ).transpose(1, 2)
-            else:
-                bap_aug_upsampled = bap_aug
-        else:
-            bap_upsampled = bap
-            bap_aug_upsampled = bap_aug
+        freq_bins = target_spectrogram.shape[-1]
+        bap_upsampled_original = interpolate_bap_linear(bap, freq_bins)
+        bap_upsampled_aug = interpolate_bap_linear(bap_aug, freq_bins)
 
-        # BAP -> Aperiodicity変換
-        aperiodicity_original = torch.sigmoid(bap_upsampled)
-        aperiodicity_aug = torch.sigmoid(bap_aug_upsampled)
-
-        # 数値安定性のため小さな値を加算してから対数を取る
-        # FIXME: 数値安定性の精度検証 - 重要度：低
-        # 1. sigmoid -> log変換でのeps=1e-8が適切かの検証
-        # 2. aperiodicity値の実際の分布範囲での安定性確認
-        # 3. より堅牢な対数変換手法の検討余地
-        eps = 1e-8
-        log_ap_original = torch.log(aperiodicity_original + eps)
-        log_ap_aug = torch.log(aperiodicity_aug + eps)
-
-        # L_ap = ||log(A_aug) - log(A)||_1
-        loss_ap = torch.mean(torch.abs(log_ap_aug - log_ap_original))
+        # L_ap損失: 対数振幅領域で直接計算（効率性最適化）
+        # log(exp(BAP1)) - log(exp(BAP2)) = BAP1 - BAP2
+        loss_ap = torch.mean(torch.abs(bap_upsampled_aug - bap_upsampled_original))
 
         # 全SLASH損失の重み付き合成（ノイズロバスト損失追加）
         # FIXME: 損失重みバランス調整の必要性 - 重要度：中
