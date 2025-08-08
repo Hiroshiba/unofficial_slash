@@ -39,7 +39,9 @@ def test_dataset_creation(train_config: Config) -> None:
 
     assert datasets.train is not None
     assert datasets.test is not None
-    assert datasets.eval is not None
+    assert (
+        datasets.eval is None
+    )  # NOTE: 学習データに正解F0がないため、evalデータセットはない
     assert datasets.valid is not None
 
 
@@ -85,7 +87,7 @@ def test_e2e_generate(train_output_dir: Path, tmp_path: Path) -> None:
         predictor_iteration=None,
         config_path=None,
         predictor_path=None,
-        dataset_type=DatasetType.EVAL,
+        dataset_type=DatasetType.VALID,
         output_dir=generate_output_dir,
         use_gpu=False,
     )

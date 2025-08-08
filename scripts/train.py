@@ -59,15 +59,16 @@ class EvaluationResults:
     """評価結果"""
 
     test: ModelOutput
-    eval: EvaluatorOutput
+    eval: EvaluatorOutput | None
     valid: EvaluatorOutput | None
 
     def to_summary_dict(self) -> dict[str, Any]:
         """ログ出力用の辞書を生成"""
         summary = {
             DatasetType.TEST.value: _delete_data_num(self.test),
-            DatasetType.EVAL.value: _delete_data_num(self.eval),
         }
+        if self.eval is not None:
+            summary[DatasetType.EVAL.value] = _delete_data_num(self.eval)
         if self.valid is not None:
             summary[DatasetType.VALID.value] = _delete_data_num(self.valid)
         return summary
@@ -80,7 +81,7 @@ class TrainingContext:
     config: Config
     train_loader: DataLoader
     test_loader: DataLoader
-    eval_loader: DataLoader
+    eval_loader: DataLoader | None
     valid_loader: DataLoader | None
     model: Model
     evaluator: Evaluator
@@ -132,8 +133,10 @@ def setup_training_context(config_yaml_path: Path, output_dir: Path) -> Training
     test_loader = create_data_loader(
         config, datasets.test, for_train=False, for_eval=False
     )
-    eval_loader = create_data_loader(
-        config, datasets.eval, for_train=False, for_eval=True
+    eval_loader = (
+        create_data_loader(config, datasets.eval, for_train=False, for_eval=True)
+        if datasets.eval is not None
+        else None
     )
     valid_loader = (
         create_data_loader(config, datasets.valid, for_train=False, for_eval=True)
@@ -278,15 +281,17 @@ def evaluate(context: TrainingContext) -> EvaluationResults:
     test_result = reduce_result(test_result_list)
 
     # eval評価
+    eval_result: EvaluatorOutput | None = None
     eval_result_list: list[EvaluatorOutput] = []
-    for batch in context.eval_loader:
-        batch = to_device(batch, context.device, non_blocking=True)
-        result = context.evaluator(batch)
-        eval_result_list.append(detach_cpu(result))
-    eval_result = reduce_result(eval_result_list)
+    if context.eval_loader is not None:
+        for batch in context.eval_loader:
+            batch = to_device(batch, context.device, non_blocking=True)
+            result = context.evaluator(batch)
+            eval_result_list.append(detach_cpu(result))
+        eval_result = reduce_result(eval_result_list)
 
     # valid評価
-    valid_result = None
+    valid_result: EvaluatorOutput | None = None
     if context.valid_loader is not None:
         valid_result_list: list[EvaluatorOutput] = []
         for batch in context.valid_loader:
