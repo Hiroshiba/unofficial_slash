@@ -216,7 +216,7 @@ def bap_to_aperiodicity(bap_upsampled: Tensor) -> Tensor:
     # FIXME: exp変換の数値安定性 - 重要度：中
     # 1. 対数振幅から線形振幅への変換でexpが適切だが発散の可能性
     # 2. clampによる値域制限の必要性検討
-    return torch.exp(bap_upsampled)
+    return torch.exp(torch.clamp(bap_upsampled, max=10.0))
 
 
 class Model(nn.Module):
@@ -313,27 +313,29 @@ class Model(nn.Module):
             aperiodicity=aperiodicity,
         )
 
-        # BAP損失（target_f0ベースのV/UV判定で循環参照解消）
-        # FIXME: target_f0品質依存性 - 重要度：高
-        # 1. ground truthラベルの品質に直接依存する判定基準
-        # 2. MIR-1K歌声データでのF0=0境界値・V/UV判定の音響的妥当性要検証
-        # 3. より音響特徴量ベース（スペクトル特性等）の独立判定基準検討余地
-        # 4. 学習時target_f0使用・推論時未使用の設計不整合による性能影響未検証
-        # 5. BAP損失特性変更に伴う損失重みw_bap最適化の必要性検討
-        # FIXME: 時間軸不整合問題 - 重要度：高 **新規発見**
-        # 1. target_f0: (B, 480) vs bap: (B, 481, 8) で1フレーム差が発生
-        # 2. CQTとSTFT処理での時間軸計算不整合が原因の可能性
-        # 3. torch.whereでのサイズエラーによる学習停止問題
-        # 4. 修正方法: フレーム数の短い方に合わせる、または時間軸計算の統一化
-        # target_f0 > 0で有声音判定（独立した判定基準）
-        voiced_mask_target = target_f0 > 0  # (B, T)
+        # 時間軸統一処理
+        t_f0 = target_f0.shape[1]
+        t_bap = bap_upsampled.shape[1]
+        frame_diff = abs(t_f0 - t_bap)
+
+        if frame_diff > 1:
+            raise ValueError(
+                f"Frame count mismatch too large: target_f0={t_f0}, bap={t_bap} "
+                f"(diff={frame_diff}). Check CQT/STFT parameter consistency."
+            )
+
+        min_frames = min(t_f0, t_bap)
+        target_f0_aligned = target_f0[:, :min_frames]
+        bap_upsampled_aligned = bap_upsampled[:, :min_frames, :]
+
+        voiced_mask_target = target_f0_aligned > 0
 
         bap_target = torch.where(
             voiced_mask_target.unsqueeze(-1),
-            torch.zeros_like(bap_upsampled),  # 有声音: 低BAP(0に近く)
-            torch.ones_like(bap_upsampled),  # 無声音: 高BAP(1に近く)
+            torch.zeros_like(bap_upsampled_aligned),
+            torch.ones_like(bap_upsampled_aligned),
         )
-        loss_bap = huber_loss(bap_upsampled, bap_target)
+        loss_bap = huber_loss(bap_upsampled_aligned, bap_target)
 
         # L_pseudo損失
         loss_pseudo = pseudo_spectrogram_loss(
@@ -353,7 +355,6 @@ class Model(nn.Module):
             )
         )
 
-        # L_recon損失
         # FIXME: GED α パラメータのバランス検証 - 重要度：中
         # 1. 現在のged_alpha=0.1は論文値だが実装特有の調整が未検証
         # 2. 他の損失重みとのバランス調整が必要な可能性
