@@ -86,8 +86,8 @@ train:
   eval_batch_size: 5
   log_epoch: 1
   eval_epoch: 2
-  snapshot_epoch: 4
-  stop_epoch: 1000
+  snapshot_epoch: 3
+  stop_epoch: 4
   model_save_num: 2
   optimizer:
     name: "adamw"

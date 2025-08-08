@@ -32,8 +32,20 @@ def raw_pitch_accuracy(
     f0_max: float = 2000.0,  # F0最大値
 ) -> tuple[Tensor, Tensor]:
     """Raw Pitch Accuracy (RPA) - SLASH論文評価指標"""
+    t_pred = predicted_f0.shape[1]
+    t_target = target_f0.shape[1]
+    frame_diff = abs(t_pred - t_target)
+    if frame_diff > 1:
+        raise ValueError(
+            f"Frame count mismatch too large: predicted_f0={t_pred}, target_f0={t_target} "
+            f"(diff={frame_diff}). Check CQT/STFT parameter consistency."
+        )
+    min_frames = min(t_pred, t_target)
+    predicted_f0_aligned = predicted_f0[:, :min_frames]
+    target_f0_aligned = target_f0[:, :min_frames]
+
     # 有声フレーム判定: target_f0 > 0 かつ有効範囲内
-    voiced_mask = (target_f0 > 0) & (target_f0 >= f0_min) & (target_f0 <= f0_max)
+    voiced_mask = (target_f0_aligned > 0) & (target_f0_aligned >= f0_min) & (target_f0_aligned <= f0_max)
 
     if voiced_mask.sum() == 0:
         # 有声フレームが存在しない場合
@@ -41,8 +53,8 @@ def raw_pitch_accuracy(
         return torch.tensor(0.0, device=device), torch.tensor(0, device=device)
 
     # 有声フレームのみを抽出
-    pred_voiced = predicted_f0[voiced_mask]
-    target_voiced = target_f0[voiced_mask]
+    pred_voiced = predicted_f0_aligned[voiced_mask]
+    target_voiced = target_f0_aligned[voiced_mask]
 
     # cent差分計算: 1200 * log2(pred/target)
     # 数値安定性のためクランプ
@@ -68,16 +80,28 @@ def log_f0_rmse(
     f0_max: float = 2000.0,  # F0最大値
 ) -> Tensor:
     """log-F0 RMSE - SLASH論文評価指標"""
+    t_pred = predicted_f0.shape[1]
+    t_target = target_f0.shape[1]
+    frame_diff = abs(t_pred - t_target)
+    if frame_diff > 1:
+        raise ValueError(
+            f"Frame count mismatch too large: predicted_f0={t_pred}, target_f0={t_target} "
+            f"(diff={frame_diff}). Check CQT/STFT parameter consistency."
+        )
+    min_frames = min(t_pred, t_target)
+    predicted_f0_aligned = predicted_f0[:, :min_frames]
+    target_f0_aligned = target_f0[:, :min_frames]
+
     # 有声フレーム判定: target_f0 > 0 かつ有効範囲内
-    voiced_mask = (target_f0 > 0) & (target_f0 >= f0_min) & (target_f0 <= f0_max)
+    voiced_mask = (target_f0_aligned > 0) & (target_f0_aligned >= f0_min) & (target_f0_aligned <= f0_max)
 
     if voiced_mask.sum() == 0:
         # 有声フレームが存在しない場合
         return torch.tensor(0.0, device=predicted_f0.device)
 
     # 有声フレームのみを抽出
-    pred_voiced = predicted_f0[voiced_mask]
-    target_voiced = target_f0[voiced_mask]
+    pred_voiced = predicted_f0_aligned[voiced_mask]
+    target_voiced = target_f0_aligned[voiced_mask]
 
     # 数値安定性のためクランプ
     pred_voiced = torch.clamp(pred_voiced, min=f0_min, max=f0_max)
