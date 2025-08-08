@@ -60,6 +60,8 @@ def make_optimizer(config_dict: dict[str, Any], model: nn.Module) -> Optimizer:
         optimizer = torch_optimizer.Ranger(model.parameters(), **cp)
     elif n == "sgd":
         optimizer = optim.SGD(model.parameters(), **cp)
+    elif n == "adamw":
+        optimizer = optim.AdamW(model.parameters(), **cp)
     elif n == "true_adamw":
         cp["weight_decay"] /= cp["lr"]
         optimizer = optim.AdamW(model.parameters(), **cp)

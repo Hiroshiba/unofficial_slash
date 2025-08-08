@@ -1,14 +1,13 @@
 """テストの便利モジュール"""
 
-import json
 from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
+import scipy.io.wavfile
 import yaml
 
 from unofficial_slash.config import Config
-from unofficial_slash.data.sampling_data import SamplingData
 
 
 def setup_data_and_config(base_config_path: Path, data_dir: Path) -> Config:
@@ -49,80 +48,58 @@ def setup_data_and_config(base_config_path: Path, data_dir: Path) -> Config:
         if not valid_pathlist_path.exists():
             valid_pathlist_path.write_text("\n".join(all_relative_paths[train_num:]))
 
-    # 可変長データの長さを事前に決定
-    variable_lengths = {}
+    # 可変長データの長さを事前に決定（音声長用、秒単位）
+    audio_lengths = {}
     for stem in all_stems:
-        variable_lengths[stem] = int(np.random.default_rng().integers(5, 15))
+        audio_lengths[stem] = float(np.random.default_rng().uniform(1.2, 3.6))
 
-    # 固定長特徴ベクトル
-    def generate_feature_vector(file_path: Path) -> None:
-        feature_vector = (
-            np.random.default_rng()
-            .normal(size=config.network.feature_vector_size)
-            .astype(np.float32)
-        )
-        np.save(file_path, feature_vector)
-
-    _setup_data(generate_feature_vector, "feature_vector", "npy")
-
-    # 可変長特徴データ
-    def generate_feature_variable(file_path: Path) -> None:
+    # SLASH用音声ファイル生成
+    def generate_audio(file_path: Path) -> None:
         stem = file_path.stem
-        variable_length = variable_lengths[stem]
-        feature_variable = (
-            np.random.default_rng()
-            .normal(size=(variable_length, config.network.feature_variable_size))
-            .astype(np.float32)
-        )
-        np.save(file_path, feature_variable)
+        duration = audio_lengths[stem]
+        sample_rate = config.dataset.sample_rate
+        
+        # 音声サンプル数
+        num_samples = int(duration * sample_rate)
+        t = np.linspace(0, duration, num_samples, dtype=np.float32)
+        
+        # 基本周波数（F0）をランダムに設定
+        f0 = float(np.random.default_rng().uniform(100, 300))
+        
+        # 正弦波生成
+        audio_signal = 0.5 * np.sin(2 * np.pi * f0 * t)
+        
+        # 白色ノイズ追加
+        noise = 0.1 * np.random.default_rng().normal(size=num_samples).astype(np.float32)
+        audio_signal += noise
+        
+        # 16bit integer に変換
+        audio_int16 = (audio_signal * 32767).astype(np.int16)
+        
+        # WAVファイル保存
+        scipy.io.wavfile.write(file_path, sample_rate, audio_int16)
 
-    _setup_data(generate_feature_variable, "feature_variable", "npy")
+    _setup_data(generate_audio, "audio", "wav")
 
-    # サンプリングデータ
-    def generate_target_vector(file_path: Path) -> None:
-        array_length = config.dataset.frame_length
-        array = np.random.default_rng().integers(
-            0, config.network.target_vector_size, size=array_length, dtype=np.int64
-        )
-        sampling_data = SamplingData(array=array, rate=config.dataset.frame_rate)
-        sampling_data.save(file_path)
-
-    _setup_data(generate_target_vector, "target_vector", "npy")
-
-    # 可変長回帰ターゲット
-    def generate_target_variable(file_path: Path) -> None:
+    # SLASH用ピッチラベル生成
+    def generate_pitch_label(file_path: Path) -> None:
         stem = file_path.stem
-        variable_length = variable_lengths[stem]
-        array = (
-            np.random.default_rng()
-            .normal(size=(variable_length, config.network.target_vector_size))
-            .astype(np.float32)
-        )
-        sampling_data = SamplingData(array=array, rate=1.0)
-        sampling_data.save(file_path)
+        duration = audio_lengths[stem]
+        frame_rate = config.dataset.frame_rate
+        
+        # フレーム数計算
+        num_frames = int(duration * frame_rate)
+        
+        # F0値生成（80-400Hzの範囲）
+        base_f0 = float(np.random.default_rng().uniform(100, 300))
+        f0_variation = np.random.default_rng().normal(0, 10, num_frames).astype(np.float32)
+        f0_values = np.clip(base_f0 + f0_variation, 80, 400)
+        
+        # テキストファイルとして保存（1行1フレーム）
+        with file_path.open("w") as f:
+            for f0 in f0_values:
+                f.write(f"{f0:.2f}\n")
 
-    _setup_data(generate_target_variable, "target_variable", "npy")
-
-    # 回帰ターゲット
-    def generate_target_scalar(file_path: Path) -> None:
-        target_class = np.random.default_rng().integers(
-            0, config.network.target_vector_size, dtype=np.int64
-        )
-        target_scalar = float(target_class) + np.random.default_rng().normal() * 0.1
-        np.save(file_path, target_scalar)
-
-    _setup_data(generate_target_scalar, "target_scalar", "npy")
-
-    # 話者マッピング
-    speaker_names = ["A", "B", "C"]
-    speaker_dict = {name: [] for name in speaker_names}
-    for stem in all_stems:
-        speaker_name = speaker_names[int(stem) % len(speaker_names)]
-        speaker_dict[speaker_name].append(stem)
-
-    speaker_dict_path = data_dir / "speaker_dict.json"
-    speaker_dict_path.write_text(json.dumps(speaker_dict))
-    config.dataset.train.speaker_dict_path = speaker_dict_path
-    config.dataset.valid.speaker_dict_path = speaker_dict_path
+    _setup_data(generate_pitch_label, "pitch_label", "txt")
 
     return config

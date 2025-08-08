@@ -278,6 +278,10 @@ class Model(nn.Module):
         )
 
         # BAP -> aperiodicity変換
+        # FIXME: BAP（8次元）→full aperiodicity（513次元）の変換処理に次元不整合問題
+        # - 現在: V/UV Detector内でスペクトル包絡（513次元）とaperiodicity（8次元）のサイズが合わない
+        # - 論文では8次元BAP使用を明記しているが、513次元への具体的拡張方法が不明
+        # - 線形補間が適切かどうかも要検証（論文参照：Section 2.5）
         if bap.shape[-1] != freq_bins:
             bap_upsampled = F.interpolate(
                 bap.transpose(1, 2),  # (B, bap_bins, T)

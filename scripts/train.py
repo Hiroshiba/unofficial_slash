@@ -152,15 +152,18 @@ def setup_training_context(config_yaml_path: Path, output_dir: Path) -> Training
     print("predictor:", predictor)
 
     # model
-    predictor_scripted: Predictor = torch.jit.script(predictor)  # type: ignore
+    # FIXME: TorchScript化を一時的に無効化（nnAudio/CQTがtorch.jit.scriptと互換性がないため）
+    # predictor_scripted: Predictor = torch.jit.script(predictor)  # type: ignore
+    predictor_scripted = predictor  # TorchScript化をスキップ
     model = Model(model_config=config.model, predictor=predictor_scripted)
     if config.train.weight_initializer is not None:
         init_weights(model, name=config.train.weight_initializer)
     model.to(device)
 
     # evaluator
+    # FIXME: TorchScript無効化に伴いpredictor（元のオブジェクト）を直接使用
     generator = Generator(
-        config=config, predictor=predictor_scripted, use_gpu=config.train.use_gpu
+        config=config, predictor=predictor, use_gpu=config.train.use_gpu
     )
     evaluator = Evaluator(generator=generator)
 

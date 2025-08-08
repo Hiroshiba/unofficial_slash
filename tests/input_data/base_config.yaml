@@ -83,8 +83,8 @@ model:
   volume_change_db_range: 6.0  # 音量変更範囲 (±dB) - 論文準拠
 
 train:
-  batch_size: 17
-  eval_batch_size: 17
+  batch_size: 5  # NOTE: SLASH論文では17だが、テストデータ30個でdrop_last対応のため5に変更
+  eval_batch_size: 5
   log_epoch: 1
   eval_epoch: 2
   snapshot_epoch: 4
