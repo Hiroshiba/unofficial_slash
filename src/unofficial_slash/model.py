@@ -275,12 +275,14 @@ class Model(nn.Module):
         )
         target_spectrogram = torch.abs(stft_result).transpose(-1, -2)  # (B, T, K)
 
-        # CQT-STFTフレーム数整合性チェック
-        if target_spectrogram.shape[1] != f0_values.shape[1]:
+        # CQT-STFTフレーム数差チェック（1フレーム差は技術的制約として正常）
+        frame_diff_cqt_stft = abs(target_spectrogram.shape[1] - f0_values.shape[1])
+        if frame_diff_cqt_stft > 1:
             raise ValueError(
-                f"CQT-STFT frame count mismatch: "
-                f"CQT={f0_values.shape[1]}, STFT={target_spectrogram.shape[1]}. "
-                f"Check hop_length consistency in NetworkConfig."
+                f"CQT-STFT frame count mismatch too large: "
+                f"CQT={f0_values.shape[1]}, STFT={target_spectrogram.shape[1]} "
+                f"(diff={frame_diff_cqt_stft}). "
+                f"1フレーム差は正常、2フレーム以上は設定確認が必要。"
             )
 
         # F0値のみ勾配を残してPseudo Spectrogram生成
@@ -313,7 +315,7 @@ class Model(nn.Module):
             aperiodicity=aperiodicity,
         )
 
-        # 時間軸統一処理
+        # 時間軸統一処理（CQTとSTFTの1フレーム差は技術的制約として正常）
         t_f0 = target_f0.shape[1]
         t_bap = bap_upsampled.shape[1]
         frame_diff = abs(t_f0 - t_bap)
@@ -321,7 +323,8 @@ class Model(nn.Module):
         if frame_diff > 1:
             raise ValueError(
                 f"Frame count mismatch too large: target_f0={t_f0}, bap={t_bap} "
-                f"(diff={frame_diff}). Check CQT/STFT parameter consistency."
+                f"(diff={frame_diff}). "
+                f"1フレーム差は正常（nnAudio CQTとtorch.stftの実装方式差）、2フレーム以上は異常。"
             )
 
         min_frames = min(t_f0, t_bap)

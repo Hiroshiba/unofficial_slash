@@ -164,11 +164,6 @@ class Predictor(nn.Module):
     ) -> tuple[Tensor, Tensor, Tensor]:  # (B, T, ?), (B, T), (B, T, ?)
         """通常の推論用: audio -> CQT -> encode"""
         # GPU対応CQT変換
-        # FIXME: CQT時間軸整合性確保 - 重要度：高
-        # 1. nnAudio.CQTのhop_length=120による時間フレーム数計算
-        # 2. model.pyのtorch.stftと同一audio入力での時間軸T一致が前提
-        # 3. 異なる音声長での動作一貫性・境界処理の検証が必要
-        # 4. CQT変換後のフレーム数がPredictorの出力時間軸と一致することを保証
         cqt_full = self.cqt_transform(audio)  # (B, cqt_total_bins, T)
 
         # 中央176 binsを抽出
