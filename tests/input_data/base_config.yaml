@@ -14,43 +14,42 @@ dataset:
   frame_rate: 200.0
   frame_length: 480
 
-  # ピッチシフト設定
+  # ピッチシフト
   pitch_shift_range: 14
 
 network:
-  # 基本設定
   sample_rate: 24000
-  
-  # Pitch Encoder 設定
+
+  # Pitch Encoder
   f0_bins: 1024
   bap_bins: 8
-  hidden_size: 512
-  encoder_layers: 6
+  hidden_size: 16 # NOTE: SLASH論文では512
+  encoder_layers: 2 # NOTE: SLASH論文では6
 
-  # CQT 設定
+  # CQT
   cqt_bins: 176
   cqt_total_bins: 205
   cqt_hop_length: 120
   cqt_bins_per_octave: 24
   cqt_fmin: 32.70
   cqt_filter_scale: 0.5
-  
-  # Pitch Guide Generator 設定
+
+  # Pitch Guide Generator
   pitch_guide_window_size: 50
   pitch_guide_shs_n_max: 10
   pitch_guide_f_min: 20.0
   pitch_guide_f_max: 2000.0
   pitch_guide_n_fft: 1024
-  
-  # Pseudo Spectrogram Generator 設定
+
+  # Pseudo Spectrogram Generator
   pseudo_spec_epsilon: 0.001
   pseudo_spec_n_fft: 1024
   pseudo_spec_hop_length: 120
-  
-  # DDSP Synthesizer 設定
-  ddsp_n_harmonics: 16  # ハーモニクス次数
-  
-  # V/UV Detector 設定
+
+  # DDSP Synthesizer
+  ddsp_n_harmonics: 16
+
+  # V/UV Detector
   vuv_detector_eps: 1e-8
   vuv_threshold: 0.5
 
@@ -60,30 +59,30 @@ model:
   w_guide: 1.0
   w_pseudo: 10.0
   w_recon: 5.0
-  w_bap: 0.1  # Band Aperiodicity損失重み
+  w_bap: 0.1
 
-  # ノイズロバスト損失重み (SLASH論文 Section 2.6)
-  w_aug: 1.0      # L_aug: 拡張データでの基本損失重み
-  w_g_aug: 1.0    # L_g-aug: 拡張データでのPitch Guide損失重み
-  w_ap: 1.0       # L_ap: Aperiodicity一貫性損失重み
-  
+  # ノイズロバスト損失重み
+  w_aug: 1.0
+  w_g_aug: 1.0
+  w_ap: 1.0
+
   # 損失パラメータ
   hinge_margin: 0.5
   ged_alpha: 0.1
   epsilon: 0.001
-  huber_delta: 1.0  # Pitch Consistency Loss用のHuber損失デルタ
-  
-  # F0境界値
-  f0_min: 20.0    # 人間の音声の最低F0 (Hz)
-  f0_max: 2000.0  # 人間の音声の最高F0 (Hz)
+  huber_delta: 1.0
 
-  # ノイズロバスト化設定 (SLASH論文 Section 2.6)
-  noise_snr_db_min: -6.0   # 最大ノイズレベル (SNR dB) - 論文準拠
-  noise_snr_db_max: 20.0   # 最小ノイズレベル (SNR dB)
-  volume_change_db_range: 6.0  # 音量変更範囲 (±dB) - 論文準拠
+  # F0境界値
+  f0_min: 20.0
+  f0_max: 2000.0
+
+  # ノイズロバスト化
+  noise_snr_db_min: -6.0
+  noise_snr_db_max: 20.0
+  volume_change_db_range: 6.0
 
 train:
-  batch_size: 5  # NOTE: SLASH論文では17だが、テストデータ30個でdrop_last対応のため5に変更
+  batch_size: 5 # NOTE: SLASH論文では17
   eval_batch_size: 5
   log_epoch: 1
   eval_epoch: 2
