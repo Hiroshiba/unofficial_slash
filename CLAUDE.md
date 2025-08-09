@@ -8,8 +8,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### 優先度の高い残存タスク
 
-- SHS実装の効率化・ベクトル化
-  - `pitch_guide.subharmonic_summation`: forループ・フレーム毎正規化のループをベクトル化し、メモリ/速度を改善。n_maxや重みのチューニング根拠も補強。
 - 動的バッチング未実装
   - `batch.py`/`dataset.py`: 固定長前提でのパディング。平均バッチサイズ17相当の効率化は今後の学習スケールで効く。
 - 真のスペクトル包絡推定器
@@ -524,6 +522,7 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 - ✅ **L_recon** (Aperiodicity最適化) - GEDによる非周期性最適化 - 論文Equation (8)準拠
 - ✅ **V/UV Detector** (有声/無声判定) - 論文Equation (9)準拠
 - ✅ **DSPモジュール完備**: PitchGuide, PseudoSpec, DDSP, VUVDetector実装完了
+- ✅ **SHS最適化完了**: pitch_guide.pyの効率化・ベクトル化実装完了
 - ✅ **設定システム統合**: 全パラメータを設定ファイルから統一管理
 
 **解決した主要課題**:
@@ -531,6 +530,7 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 - 論文との数学的整合性確認済み（全損失関数・DSPアルゴリズム）
 - 設定値の完全統一化（ハードコーディング問題解決済み）
 - データフロー・テンソル形状の整合性確認済み
+- SHS実装の効率化・ベクトル化完了（GPU最適化、メモリ効率改善）
 - 実学習実行に向けた技術課題解決済み
 
 ## 🚨 **現状の技術課題・未解決問題**

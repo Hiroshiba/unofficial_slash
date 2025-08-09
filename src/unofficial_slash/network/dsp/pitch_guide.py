@@ -68,51 +68,24 @@ def subharmonic_summation(
     f_min: float,
     f_max: float,
 ) -> Tensor:
-    """
-    Subharmonic Summation (SHS) アルゴリズム
-
-    FIXME: SHSアルゴリズム最適化 - 重要度：低
-    1. n_max=10が最適値かの検証が不完全（論文では詳細パラメータ記載なし）
-    2. サブハーモニック重み（1/n）の妥当性・他の重み関数との比較
-    3. 対数周波数スケールでの補間精度・計算効率の最適化余地
-    4. 境界条件（f_min, f_max付近）での処理の安定性検証
-    5. バッチ処理の計算効率化（現在はループベース）
-
-    Args:
-        log_spectrum: 対数周波数スペクトログラム (B, T, F)
-        n_max: 最大サブハーモニック次数
-        f_min: 最低周波数 (Hz)
-        f_max: 最高周波数 (Hz)
-
-    Returns
-    -------
-        SHS適用後のスペクトログラム (B, T, F)
-    """
-    batch_size, time_frames, freq_bins = log_spectrum.shape
+    """Subharmonic Summation (SHS) アルゴリズム"""
+    _, _, freq_bins = log_spectrum.shape
+    cents_per_bin = 1200.0 * math.log2(f_max / f_min) / (freq_bins - 1)
+    shs_spectrum = log_spectrum.clone()
     device = log_spectrum.device
 
-    # 対数周波数スケールの分解能 (cents/bin)
-    cents_per_bin = 1200.0 * math.log2(f_max / f_min) / (freq_bins - 1)
+    n_vals = torch.arange(2, n_max + 1, device=device)
+    shift_cents = 1200.0 * torch.log2(n_vals.to(torch.float32))
+    shift_bins = torch.round(shift_cents / cents_per_bin).to(torch.int64)
+    weights = (0.86 ** (n_vals - 1)).to(log_spectrum.dtype)  # 論文準拠: βn = 0.86^(n-1)
 
-    # SHSスペクトログラム初期化（n=1の項）
-    shs_spectrum = log_spectrum.clone()
+    valid_mask = (shift_bins > 0) & (shift_bins < freq_bins)
+    if torch.any(valid_mask):
+        shift_bins = shift_bins[valid_mask]
+        weights = weights[valid_mask]
 
-    # n=2からn_maxまでサブハーモニックを加算
-    for n in range(2, n_max + 1):
-        # 対数周波数領域でのシフト量（bins）
-        shift_cents = 1200.0 * math.log2(n)
-        shift_bins = int(round(shift_cents / cents_per_bin))
-
-        if shift_bins < freq_bins:
-            # スペクトログラムをシフト（高周波数側へ）
-            shifted_spectrum = torch.zeros_like(log_spectrum)
-            shifted_spectrum[:, :, shift_bins:] = log_spectrum[
-                :, :, : freq_bins - shift_bins
-            ]
-
-            # 重み付けして加算
-            weight = 0.86 ** (n - 1)
-            shs_spectrum += weight * shifted_spectrum
+        for s, w in zip(shift_bins.tolist(), weights.tolist(), strict=True):
+            shs_spectrum[..., s:].add_(log_spectrum[..., :-s], alpha=w)
 
     return shs_spectrum
 
@@ -157,7 +130,6 @@ class PitchGuideGenerator(nn.Module):
             Pitch Guide G (B, T, F) - F = n_pitch_bins
         """
         device = waveform.device
-        batch_size = waveform.shape[0]
 
         # FIXME: STFTとCQTの周波数軸不整合問題 - Phase 4c で解決必要
         # 1. PredictorではCQTを使用しているが、ここではSTFTを使用
@@ -197,22 +169,9 @@ class PitchGuideGenerator(nn.Module):
             self.f_max,
         )  # (B, T, F)
 
-        # FIXME: SHSアルゴリズムの効率化と最適化 - 中優先度
-        # 1. フレーム別正規化のループ処理はメモリ効率が悪い
-        # 2. torch.max(dim=-1)を使用したベクトル化による高速化が必要
-        # 3. SHS重み係数（0.86）が論文特有の値か、調整可能か不明
-        # 4. サブハーモニック次数n_maxの最適値が論文で不明確
-        # 5. 大きなバッチサイズでのメモリ使用量最適化が未実施
-        # 各フレームで最大値を1に正規化
-        time_frames = shs_spectrum.shape[1]
-        normalized_spectrum = torch.zeros_like(shs_spectrum)
-
-        for t in range(time_frames):
-            frame = shs_spectrum[:, t, :]  # (B, F)
-            max_vals = torch.max(frame, dim=1, keepdim=True)[0]  # (B, 1)
-
-            # ゼロ除算回避
-            max_vals = torch.clamp(max_vals, min=1e-8)
-            normalized_spectrum[:, t, :] = frame / max_vals
+        # 論文準拠: G'は各時間フレームの最大値を1にする正規化が必要
+        max_vals = torch.max(shs_spectrum, dim=-1, keepdim=True)[0]
+        max_vals = torch.clamp(max_vals, min=1e-8)
+        normalized_spectrum = shs_spectrum / max_vals
 
         return normalized_spectrum
