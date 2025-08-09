@@ -1,7 +1,8 @@
 dataset:
   train:
     audio_pathlist_path: "tests/data/test_data/train_audio_pathlist.txt"
-    pitch_label_pathlist_path: "tests/data/test_data/train_pitch_pathlist.txt"
+    # SLASH論文準拠: 学習時はpitch_labelを使用しない（自己教師あり学習）
+    pitch_label_pathlist_path: null
     root_dir: "tests/data/test_data"
   valid:
     audio_pathlist_path: "tests/data/test_data/valid_audio_pathlist.txt"

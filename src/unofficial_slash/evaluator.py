@@ -45,7 +45,11 @@ def raw_pitch_accuracy(
     target_f0_aligned = target_f0[:, :min_frames]
 
     # 有声フレーム判定: target_f0 > 0 かつ有効範囲内
-    voiced_mask = (target_f0_aligned > 0) & (target_f0_aligned >= f0_min) & (target_f0_aligned <= f0_max)
+    voiced_mask = (
+        (target_f0_aligned > 0)
+        & (target_f0_aligned >= f0_min)
+        & (target_f0_aligned <= f0_max)
+    )
 
     if voiced_mask.sum() == 0:
         # 有声フレームが存在しない場合
@@ -93,7 +97,11 @@ def log_f0_rmse(
     target_f0_aligned = target_f0[:, :min_frames]
 
     # 有声フレーム判定: target_f0 > 0 かつ有効範囲内
-    voiced_mask = (target_f0_aligned > 0) & (target_f0_aligned >= f0_min) & (target_f0_aligned <= f0_max)
+    voiced_mask = (
+        (target_f0_aligned > 0)
+        & (target_f0_aligned >= f0_min)
+        & (target_f0_aligned <= f0_max)
+    )
 
     if voiced_mask.sum() == 0:
         # 有声フレームが存在しない場合

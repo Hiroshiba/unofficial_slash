@@ -31,7 +31,12 @@ def setup_data_and_config(base_config_path: Path, data_dir: Path) -> Config:
         train_pathlist_path = data_dir / f"train_{data_type}_pathlist.txt"
         valid_pathlist_path = data_dir / f"valid_{data_type}_pathlist.txt"
 
-        setattr(config.dataset.train, f"{data_type}_pathlist_path", train_pathlist_path)
+        # 学習時はpitch_labelを使用しない
+        if data_type != "pitch_label":
+            setattr(
+                config.dataset.train, f"{data_type}_pathlist_path", train_pathlist_path
+            )
+
         setattr(config.dataset.valid, f"{data_type}_pathlist_path", valid_pathlist_path)
 
         data_dir_path = root_dir / data_type

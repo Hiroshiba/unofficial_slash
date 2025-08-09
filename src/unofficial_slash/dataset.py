@@ -41,14 +41,11 @@ class LazyInputData:
         if self.pitch_label_path is not None:
             pitch_data = numpy.loadtxt(self.pitch_label_path)
 
-        # デフォルトピッチラベルを音声長に合わせて生成（後でフレーム単位に調整）
-        if pitch_data is None:
-            # 仮の長さでゼロ配列を作成（preprocessで正確に調整される）
-            pitch_data = numpy.zeros(1000, dtype=numpy.float32)
-
         return InputData(
             audio=audio.squeeze(0).numpy(),  # (T,) 音声波形
-            pitch_label=pitch_data.astype(numpy.float32),  # (T,) ピッチラベル
+            pitch_label=pitch_data.astype(numpy.float32)
+            if pitch_data is not None
+            else None,  # (T,) ピッチラベル
         )
 
 

@@ -12,7 +12,9 @@ class InputData:
     """データ処理前のデータ構造"""
 
     audio: numpy.ndarray  # (T,) 音声波形
-    pitch_label: numpy.ndarray  # (T,) ピッチラベル（セミトーンまたはHz）
+    pitch_label: (
+        numpy.ndarray | None
+    )  # (T,) ピッチラベル（セミトーンまたはHz、学習時はNone）
 
 
 @dataclass
@@ -20,7 +22,7 @@ class OutputData:
     """データ処理後のデータ構造"""
 
     audio: Tensor  # (T,) 音声波形
-    pitch_label: Tensor  # (T,) ピッチラベル
+    pitch_label: Tensor | None  # (T,) ピッチラベル（学習時はNone）
     pitch_shift_semitones: float  # ピッチシフト量（semitones）
 
 
@@ -35,7 +37,9 @@ def preprocess(
 ) -> OutputData:
     """データ処理"""
     audio_data = d.audio.astype(numpy.float32)
-    pitch_labels = d.pitch_label.astype(numpy.float32)
+    pitch_labels = (
+        d.pitch_label.astype(numpy.float32) if d.pitch_label is not None else None
+    )
 
     # 音声長をフレーム長に対応させる
     # frame_rate (200Hz) からサンプル数を計算
@@ -58,12 +62,13 @@ def preprocess(
         audio_data = numpy.pad(audio_data, (0, padding), mode="constant")
 
     # ピッチラベルも合わせる（フレーム単位で線形補間）
-    target_frames = frame_length
-    if len(pitch_labels) != target_frames:
-        frame_indices = numpy.linspace(0, len(pitch_labels) - 1, target_frames)
-        pitch_labels = numpy.interp(
-            frame_indices, numpy.arange(len(pitch_labels)), pitch_labels
-        )
+    if pitch_labels is not None:
+        target_frames = frame_length
+        if len(pitch_labels) != target_frames:
+            frame_indices = numpy.linspace(0, len(pitch_labels) - 1, target_frames)
+            pitch_labels = numpy.interp(
+                frame_indices, numpy.arange(len(pitch_labels)), pitch_labels
+            )
 
     # ピッチシフト量の決定（学習時のみ）
     pitch_shift_semitones = 0.0
@@ -77,6 +82,8 @@ def preprocess(
 
     return OutputData(
         audio=torch.from_numpy(audio_data).float(),
-        pitch_label=torch.from_numpy(pitch_labels).float(),
+        pitch_label=torch.from_numpy(pitch_labels).float()
+        if pitch_labels is not None
+        else None,
         pitch_shift_semitones=pitch_shift_semitones,
     )

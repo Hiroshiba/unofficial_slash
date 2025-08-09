@@ -13,7 +13,7 @@ class BatchOutput:
     """バッチ処理後のデータ構造"""
 
     audio: Tensor  # (B, T) 音声波形
-    pitch_label: Tensor  # (B, T)
+    pitch_label: Tensor | None  # (B, T) ピッチラベル（学習時はNone）
     pitch_shift_semitones: Tensor  # (B,) ピッチシフト量
 
     @property
@@ -38,8 +38,19 @@ def collate_dataset_output(data_list: list[OutputData]) -> BatchOutput:
     pitch_shifts = [d.pitch_shift_semitones for d in data_list]
     shift_tensor = torch.tensor(pitch_shifts, dtype=torch.float32)
 
+    # pitch_labelのNoneケース対応
+    pitch_labels = [d.pitch_label for d in data_list]
+    if all(label is None for label in pitch_labels):
+        # 全部Noneの場合（学習時）
+        pitch_label_tensor = None
+    elif all(label is not None for label in pitch_labels):
+        # 全部存在する場合（評価時）
+        pitch_label_tensor = collate_stack(pitch_labels)
+    else:
+        raise ValueError("バッチ内でpitch_labelのNone/非Noneが混在している")
+
     return BatchOutput(
         audio=collate_stack([d.audio for d in data_list]),
-        pitch_label=collate_stack([d.pitch_label for d in data_list]),
+        pitch_label=pitch_label_tensor,
         pitch_shift_semitones=shift_tensor,
     )

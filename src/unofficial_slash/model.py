@@ -229,8 +229,10 @@ class Model(nn.Module):
 
     def forward(self, batch: BatchOutput) -> ModelOutput:
         """データをネットワークに入力して損失などを計算する"""
+        # NOTE: SLASH論文準拠の自己教師あり学習では、学習時にground truth F0ラベルは使用しない
+        assert batch.pitch_label is None, "学習時にbatch.pitch_labelはNoneであるべき"
+
         device = batch.audio.device
-        target_f0 = batch.pitch_label  # (B, T)
 
         # forward_with_shift()を常に使用（学習専用の統一フロー）
         (
@@ -316,22 +318,24 @@ class Model(nn.Module):
         )
 
         # 時間軸統一処理（CQTとSTFTの1フレーム差は技術的制約として正常）
-        t_f0 = target_f0.shape[1]
+        t_f0 = f0_values.shape[1]
         t_bap = bap_upsampled.shape[1]
         frame_diff = abs(t_f0 - t_bap)
 
         if frame_diff > 1:
             raise ValueError(
-                f"Frame count mismatch too large: target_f0={t_f0}, bap={t_bap} "
+                f"Frame count mismatch too large: f0_values={t_f0}, bap={t_bap} "
                 f"(diff={frame_diff}). "
                 f"1フレーム差は正常（nnAudio CQTとtorch.stftの実装方式差）、2フレーム以上は異常。"
             )
 
         min_frames = min(t_f0, t_bap)
-        target_f0_aligned = target_f0[:, :min_frames]
+        f0_values_aligned = f0_values[:, :min_frames]
         bap_upsampled_aligned = bap_upsampled[:, :min_frames, :]
 
-        voiced_mask_target = target_f0_aligned > 0
+        # V/UV DetectorのマスクをBAP損失用に時間軸統一
+        # vuv_maskは確率値なので、boolean化する
+        voiced_mask_target = vuv_mask[:, :min_frames] > 0.5
 
         bap_target = torch.where(
             voiced_mask_target.unsqueeze(-1),
