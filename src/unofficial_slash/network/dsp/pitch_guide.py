@@ -22,49 +22,44 @@ def convert_to_log_frequency_scale(
     original_sample_rate: int,
     original_n_fft: int,
 ) -> Tensor:
-    """
-    線形周波数スペクトログラムを対数周波数スケールに変換
-
-    Args:
-        linear_spectrum: 線形周波数スペクトログラム (B, T, K)
-        f_min: 最低周波数 (Hz)
-        f_max: 最高周波数 (Hz)
-        n_log_bins: 対数周波数スケールのビン数
-        original_sample_rate: 元の音声のサンプリングレート
-        original_n_fft: 元のFFTサイズ（Kに関連）
-
-    Returns
-    -------
-        対数周波数スペクトログラム (B, T, n_log_bins)
-    """
-    # FIXME: 最近傍補間ではなく線形補間を実装すべき
-    # 現在の実装では周波数分解能が粗くなり、音響特徴の品質が劣化する可能性
+    """線形周波数を対数周波数スケールに変換"""
     batch_size, time_frames, freq_bins = linear_spectrum.shape
     device = linear_spectrum.device
+    eps = 1e-8
 
-    # 対数周波数スケールのビン中心周波数を計算
-    log_f_min = math.log(f_min)
-    log_f_max = math.log(f_max)
-    log_freqs = torch.linspace(log_f_min, log_f_max, n_log_bins, device=device)
-    center_freqs = torch.exp(log_freqs)  # (n_log_bins,)
+    expected_freq_bins = original_n_fft // 2 + 1
+    if freq_bins != expected_freq_bins:
+        raise ValueError(
+            f"Frequency bins mismatch: spectrum has {freq_bins}, but n_fft={original_n_fft} expects {expected_freq_bins}"
+        )
 
-    # 元の線形周波数ビンの中心周波数
-    linear_freqs = torch.linspace(
-        0, original_sample_rate / 2, freq_bins, device=device
-    )  # (K,)
+    linear_freqs = torch.linspace(0, original_sample_rate / 2, freq_bins, device=device)
+    valid_mask = (linear_freqs >= f_min) & (linear_freqs <= f_max)
 
-    # 各対数周波数ビンに対して、線形スペクトラムから補間
-    log_spectrum = torch.zeros(batch_size, time_frames, n_log_bins, device=device)
+    if not valid_mask.any():
+        raise ValueError(
+            f"No valid frequency range: f_min={f_min}, f_max={f_max}, range=0-{original_sample_rate / 2}"
+        )
 
-    for i, center_freq in enumerate(center_freqs):
-        # center_freqに最も近い線形周波数ビンを探す
-        freq_diff = torch.abs(linear_freqs - center_freq)
-        closest_idx = torch.argmin(freq_diff)
+    valid_indices = torch.where(valid_mask)[0]
+    start_idx = int(valid_indices[0].item())
+    end_idx = int(valid_indices[-1].item() + 1)
 
-        # FIXME: 線形補間（簡易版: 最近傍） - 真の線形補間に変更すべき
-        log_spectrum[:, :, i] = linear_spectrum[:, :, closest_idx]
+    valid_spectrum = linear_spectrum[:, :, start_idx:end_idx]
+    valid_freq_bins = end_idx - start_idx
 
-    return log_spectrum
+    log_valid_spectrum = torch.log(valid_spectrum + eps)
+    log_flat = log_valid_spectrum.view(-1, 1, valid_freq_bins)
+
+    log_interpolated = F.interpolate(
+        log_flat,
+        size=n_log_bins,
+        mode="linear",
+        align_corners=True,
+    )
+
+    log_interpolated = log_interpolated.view(batch_size, time_frames, n_log_bins)
+    return torch.exp(log_interpolated)
 
 
 def subharmonic_summation(

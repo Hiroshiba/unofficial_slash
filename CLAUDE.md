@@ -6,6 +6,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 このリポジトリは「SLASH: Self-Supervised Speech Pitch Estimation Leveraging DSP-derived Absolute Pitch」論文の実装です。SLASH は自己教師あり学習（SSL）と従来のデジタル信号処理（DSP）を組み合わせて、音声の基本周波数（F0）推定を行う手法です。
 
+### 優先度の高い残存タスク
+
+- SHS実装の効率化・ベクトル化
+  - `pitch_guide.subharmonic_summation`: forループ・フレーム毎正規化のループをベクトル化し、メモリ/速度を改善。n_maxや重みのチューニング根拠も補強。
+- 動的バッチング未実装
+  - `batch.py`/`dataset.py`: 固定長前提でのパディング。平均バッチサイズ17相当の効率化は今後の学習スケールで効く。
+- 真のスペクトル包絡推定器
+  - 現状lag-windowベース。将来的にはWORLD等に準拠したより高精度な包絡推定へ移行したい。
+
+### 残存タスクにあるけど必要か不要か判断して削除したいタスク
+
+- 最小位相応答の妥当性
+  - `ddsp_synthesizer.apply_minimum_phase_response`: ケプストラム法の近似で、`scipy.signal.minimum_phase`等との比較検証を一度実施し、音響的妥当性と数値安定性を確認。
+- 数値安定性の見直し
+  - `bap_to_aperiodicity`: expの上限clamp値など境界動作・異常値耐性の再確認。極端F0（20/2000Hz付近）と無声区間の取り扱いの再点検。
+  - 影響: 勾配爆発/NaN回避、収束性に直結。
+- 三角波振動子の位相連続性と式の厳密性|Φ−floor(Φ)−0.5|−1）検証。定性的に機能していても、精密化余地あり。
+- GED損失の2スペクトログラム生成
+  - `ddsp_synthesizer.generate_two_spectrograms`: 乱数シード以外の摂動設計（音響的に意味のある多様化）を検討。
+
 ### 主要な特徴
 - 相対的なピッチ差学習（ピッチシフト利用）
 - DSP 由来の絶対ピッチ情報を活用
@@ -546,7 +566,6 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 - ⚠️ **BAP変換の最適化残課題**: 効率性改善実装完了後の細部検証
   - exp変換の数値安定性（VUVDetector用途でのみ発散可能性）
   - align_corners=True設定の周波数ビン対応への影響検証
-  - 線形周波数軸補間 vs 対数周波数軸補間の音響的適切性検討
 - ⚠️ **未実装の重要機能**: 
   - Dynamic batching（可変長バッチ処理・平均バッチサイズ17）
   - 真のスペクトル包絡推定器（現在は暫定的なlag-window実装）
@@ -580,10 +599,9 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 
 ### **🟡 中優先度** (機能完備・性能向上のために重要)  
 1. **生成システム実用性改善** - Phase 12基本対応完了後の使い勝手向上
-2. **BAP変換の細部最適化** - exp変換の数値安定性、対数vs線形周波数軸補間の適切性検証
+2. **BAP変換の細部最適化** - exp変換の数値安定性の検証
 3. **Dynamic batching実装** - 可変長処理による効率化（平均バッチサイズ17対応）
-4. **STFTとCQTの周波数軸不整合問題解決** - pitch_guide.pyの統一処理
-5. **バッチ処理設計改善** - pitch_shift=0時の学習・評価処理統一
+4. **バッチ処理設計改善** - pitch_shift=0時の学習・評価処理統一
 
 ### **🟢 低優先度** (最適化・発展機能)
 1. **DSPアルゴリズム精度向上** - 三角波振動子・SHS・最小位相応答の最適化
@@ -830,7 +848,6 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 
 **曖昧な部分**:
 - NANSY++ の具体的なネットワーク構造（層数、チャンネル数）(FIXME: 原論文詳細確認)
-- 対数周波数スケール（20Hz-2kHz）への正確なマッピング (FIXME: 式化必要)
 
 #### 2.2 ピッチシフト処理
 **実装対象**: CQT 空間でのピッチシフト
