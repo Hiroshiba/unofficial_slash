@@ -8,9 +8,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### 優先度の高い残存タスク
 
-- 最小位相応答の音響的検証
-  - 課題: `apply_minimum_phase_response` の音響的妥当性検証（位相特性・再現性の確認）。
-  
 - 動的バッチング未実装
   - `batch.py`/`dataset.py`: 固定長前提でのパディング。平均バッチサイズ17相当の効率化は今後の学習スケールで効く。
 
@@ -92,7 +89,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 1. **CQT 設定**: frame_shift=5ms, f_min=32.70Hz, 205bins, 24bins/octave, filter_scale=0.5
 2. **Pitch Guide**: fine structure spectrum → SHS → 正規化
 3. **Pseudo Spectrogram**: 三角波振動子 → 周期性励起スペクトログラム
-4. **DDSP 合成**: 時間領域での最小位相応答による periodic/aperiodic 成分生成
+4. **DDSP 合成**: 時間領域での合成（必要に応じて最小位相応答を使用）
 
 ### 学習設定
 - Optimizer: AdamW (lr=0.0002)
@@ -104,7 +101,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - SHS アルゴリズムの詳細パラメータ
 - GED 損失の安定化手法
 - Dynamic batching の実装詳細
-- 時間領域波形生成の最小位相応答計算
+
 
 ## 設定管理（Pydantic + YAML）
 

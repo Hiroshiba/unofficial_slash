@@ -6,7 +6,6 @@ from torch import Tensor, nn
 
 from .audio_processing import frames_to_continuous_stft
 from .ddsp_synthesizer import (
-    apply_minimum_phase_response,
     generate_aperiodic_excitation,
 )
 
@@ -100,10 +99,9 @@ class PseudoSpectrogramGenerator(nn.Module):
             aperiodicity=aperiodicity,
             frame_length=self.frame_length,
         )
-        aperiodic_with_phase = apply_minimum_phase_response(aperiodic_excitation)
 
         aperiodic_freq = frames_to_continuous_stft(
-            frame_signals=aperiodic_with_phase,
+            frame_signals=aperiodic_excitation,
             n_fft=self.n_fft,
             hop_length=self.hop_length,
         )

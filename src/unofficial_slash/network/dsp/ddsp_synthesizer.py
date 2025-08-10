@@ -122,25 +122,8 @@ def generate_aperiodic_excitation(
 def apply_minimum_phase_response(
     excitation: Tensor,  # (B, T, frame_length)
 ) -> Tensor:
-    """
-    最小位相応答を適用（ケプストラム法による近似実装）
-
-    FIXME: 最小位相応答の実装精度問題 - 中優先度
-    1. ケプストラム法の実装がscipy.signal.minimum_phaseと完全一致していない
-    2. 論文では具体的な最小位相応答手法が明記されていない
-    3. 音響信号処理として正確な最小位相特性を持つか未検証
-    4. 異なる実装（Hilbert変換法等）との比較検討が必要
-    5. 音質への影響度合いの定量的評価が未実施
-
-    Args:
-        excitation: 励起信号 (B, T, frame_length)
-
-    Returns
-    -------
-        最小位相応答適用後の信号 (B, T, frame_length)
-    """
+    """ケプストラム法で最小位相化したフレーム信号を返す"""
     batch_size, time_frames, frame_length = excitation.shape
-    device = excitation.device
 
     # 小さな値を加算してlog(0)を回避
     eps = 1e-10
