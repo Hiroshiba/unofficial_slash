@@ -8,9 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### 優先度の高い残存タスク
 
-- pseudo_spec の三角波位相および最小位相応答の音響的検証（提案）
+- pseudo_spec の三角波実装および最小位相応答の音響的検証（提案）
   - 現状: `triangle_wave_oscillator` と `apply_minimum_phase_response` は FIXME の通り近似実装で理論整合の検証が未了。
-  - 提案: 位相連続性・式(4) の厳密性・Hilbert/Scipy 実装との比較検証、極端F0時の安定性評価を実施。
+  - 提案: 式(4) の厳密性検証を実施。
   
 - 動的バッチング未実装
   - `batch.py`/`dataset.py`: 固定長前提でのパディング。平均バッチサイズ17相当の効率化は今後の学習スケールで効く。
@@ -21,11 +21,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### 残存タスクにあるけど必要か不要か判断して削除したいタスク
 
-- 最小位相応答の妥当性
-  - `ddsp_synthesizer.apply_minimum_phase_response`: ケプストラム法の近似で、`scipy.signal.minimum_phase`等との比較検証を一度実施し、音響的妥当性と数値安定性を確認。
-- 三角波振動子の位相連続性と式の厳密性|Φ−floor(Φ)−0.5|−1）検証。定性的に機能していても、精密化余地あり。
+
 - GED損失の2スペクトログラム生成
   - `ddsp_synthesizer.generate_two_spectrograms`: 乱数シード以外の摂動設計（音響的に意味のある多様化）を検討。
+
+- DDSPSynthesizer.forward が式(7)を厳密には守っていないSLASH の再構成は𝑆~=(𝐹(𝑒𝑝)⊙𝐻⊙(1−𝐴))+(𝐹(𝑒𝑎𝑝)⊙𝐻⊙𝐴)S~ =(F(e p​ )⊙H⊙(1−A))+(F(e ap​ )⊙H⊙A)ですが、実装では periodic_excitation と aperiodic_excitation を最小位相化した後に時間領域で加算→ひとつだけ STFT→その振幅を 𝐻H と 𝐴A で按分しています。成分間の干渉（時間領域での合成 → 一発 STFT）が混入するので、厳密さという観点では 各成分を別々に STFT してから重ねる ほうが論文の式に忠実です。参考までに、WORLD をそのまま微分可能にした実装では STFT 領域で 𝑠𝑝sp​  と 𝑎𝑝ap を掛けて各成分を別々に合成しています（ℎ=𝐹−1[(1−𝑎𝑝)⋅𝑠𝑝⋅𝐹(𝑒ℎ)]h=F −1 [(1−ap)⋅ sp​ ⋅F(e h​ )], 𝑛=𝐹−1[𝑎𝑝⋅𝑠𝑝⋅𝐹(𝑒𝑛)]n=F −1 [ap⋅ sp​ ⋅F(e n​ )]）。
 
 ### 主要な特徴
 - 相対的なピッチ差学習（ピッチシフト利用）
@@ -599,12 +599,10 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 
 ### **🟢 重要度：低（最適化・技術精度向上）**
 - ⚠️ **DSPアルゴリズム精度**:
-  - 三角波振動子の位相計算・時間進行の論文完全準拠検証
   - SHSアルゴリズムのパラメータ最適化
   - 最小位相応答実装のscipy.signal.minimum_phaseとの比較検証
 - ⚠️ **GED損失の2つのスペクトログラム生成**: S˜1, S˜2の生成方法が論文で不明確
   - 現在はランダムシード差のみだが、より音響的に意味のある多様性が必要か検討
-- ⚠️ **数値安定性・境界値**: F0範囲（20Hz-2000Hz）での境界付近動作の詳細検証
 
 ## 🎯 **次期実装優先順位** (Phase 13完了後 - 2025-01-22 更新)
 

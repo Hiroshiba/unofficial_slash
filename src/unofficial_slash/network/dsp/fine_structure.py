@@ -29,8 +29,7 @@ def lag_window_spectral_envelope(
     -------
         スペクトル包絡 (B, T, K)
     """
-    batch_size, time_frames, freq_bins = log_spectrum.shape
-    device = log_spectrum.device
+    _, time_frames, freq_bins = log_spectrum.shape
 
     # FFTサイズは周波数ビン数の2倍-2 (実数信号のため)
     fft_size = (freq_bins - 1) * 2

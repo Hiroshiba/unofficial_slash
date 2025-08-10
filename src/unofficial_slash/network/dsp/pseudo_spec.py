@@ -1,7 +1,5 @@
 """SLASH論文における微分可能スペクトログラム生成"""
 
-import math
-
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
@@ -20,7 +18,6 @@ def triangle_wave_oscillator(
     epsilon: float = 0.001,
 ) -> Tensor:
     """三角波振動子の実装 - SLASH論文 Equation (4) 関連"""
-    batch_size, time_frames = f0_values.shape
     device = f0_values.device
 
     # 周波数ビンインデックス k = 1, 2, ..., K
@@ -30,13 +27,11 @@ def triangle_wave_oscillator(
     f0_safe = torch.clamp(f0_values, min=1e-8)  # (B, T)
 
     # 位相計算: Φ_{t,k} = (f_s / (2 * p_t * K)) * k
+    # NOTE: フレーム間の位相連続性は考慮しない。本実装は振幅領域でのピーク整合を目的とするため、位相連続性は不要
     # FIXME: 三角波振動子の実装精度問題 - 重要度：低
     # 1. 論文Equation (4)の位相計算式との完全一致が未検証
-    # 2. フレーム間の位相連続性・時間進行が考慮されていない（現在は各フレーム独立）
-    # 3. 実際の周期信号として正しい三角波が生成されているか未検証
-    # 4. F0値による位相積算の数学的妥当性確認が必要（特に時間進行の扱い）
-    # 5. 極端なF0値（20Hz, 2000Hz付近）での動作安定性・数値精度未検証
-    # 6. 論文の「4 |Φ - floor(Φ) - 0.5| - 1」との実装一致性の詳細検証要
+    # 2. 実際の周期信号として正しい三角波が生成されているか未検証
+    # 3. 論文の「4 |Φ - floor(Φ) - 0.5| - 1」との実装一致性の詳細検証要
     phase = (
         sample_rate
         / (2 * f0_safe.unsqueeze(-1) * n_freq_bins)
@@ -63,8 +58,6 @@ def pseudo_periodic_excitation(
     epsilon: float = 0.001,
 ) -> Tensor:
     """Pseudo Periodic Excitation の計算 - SLASH論文 Equation (4)"""
-    device = triangle_wave.device
-
     # max(X, ε)を計算
     clipped_wave = torch.clamp(triangle_wave, min=epsilon)  # (B, T, K)
 
@@ -104,20 +97,6 @@ class PseudoSpectrogramGenerator(nn.Module):
         aperiodicity: Tensor,  # (B, T, K)
     ) -> Tensor:  # (B, T, K)
         """SLASH論文式(5)準拠のPseudo Spectrogram生成"""
-        if f0_values.dim() != 2:
-            raise ValueError(f"f0_values must be 2D tensor, got {f0_values.dim()}D")
-        if spectral_envelope.dim() != 3:
-            raise ValueError(
-                f"spectral_envelope must be 3D tensor, got {spectral_envelope.dim()}D"
-            )
-        if aperiodicity.dim() != 3:
-            raise ValueError(
-                f"aperiodicity must be 3D tensor, got {aperiodicity.dim()}D"
-            )
-
-        batch_size, time_frames = f0_values.shape
-        device = f0_values.device
-
         triangle_wave = triangle_wave_oscillator(
             f0_values, self.sample_rate, self.n_freq_bins, self.epsilon
         )
