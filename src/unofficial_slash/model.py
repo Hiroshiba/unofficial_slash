@@ -28,6 +28,7 @@ class ModelOutput(DataNumProtocol):
     loss_cons: Tensor  # Pitch Consistency Loss (L_cons)
     loss_bap: Tensor  # Band Aperiodicity Loss
     loss_guide: Tensor  # Pitch Guide Loss (L_guide)
+    loss_g_shift: Tensor  # Pitch Guide Shift Loss (L_g-shift)
     loss_pseudo: Tensor  # Pseudo Spectrogram Loss (L_pseudo)
     loss_recon: Tensor  # Reconstruction Loss (L_recon, GED)
 
@@ -81,6 +82,25 @@ def pitch_guide_loss(
     hinge_loss = torch.clamp(1.0 - inner_product - hinge_margin, min=0.0)
 
     # 時間軸での平均
+    loss = torch.mean(hinge_loss)
+
+    return loss
+
+
+def pitch_guide_shift_loss(
+    f0_probs_shifted: Tensor,  # (B, T, F) シフトされたF0確率分布
+    pitch_guide_shifted: Tensor,  # (B, T, F) シフトされたPitch Guide
+    hinge_margin: float,  # ヒンジ損失のマージン
+) -> Tensor:
+    """Pitch Guide Shift Loss (L_g-shift) - SLASH論文 Section 2.3"""
+    normalized_probs_shifted = F.softmax(f0_probs_shifted, dim=-1)  # (B, T, F)
+
+    inner_product = torch.sum(
+        normalized_probs_shifted * pitch_guide_shifted, dim=-1
+    )  # (B, T)
+
+    hinge_loss = torch.clamp(1.0 - inner_product - hinge_margin, min=0.0)
+
     loss = torch.mean(hinge_loss)
 
     return loss
@@ -143,7 +163,7 @@ def apply_noise_augmentation(
     snr_db_max: float,  # 最大SNR (dB)
 ) -> Tensor:
     """ノイズ付加による音声拡張 - SLASH論文 Section 2.6"""
-    batch_size, audio_length = audio.shape
+    batch_size = audio.shape[0]
     device = audio.device
 
     # バッチごとにランダムなSNRを設定
@@ -239,7 +259,7 @@ class Model(nn.Module):
             f0_probs,  # (B, T, ?)
             f0_values,  # (B, T)
             bap,  # (B, T, ?)
-            _,  # f0_probs_shifted - Phase 4b以降で使用予定
+            f0_probs_shifted,  # (B, T, ?) - L_g-shift用
             f0_values_shifted,  # (B, T)
             _,  # bap_shifted - Phase 4b以降で使用予定
         ) = self.predictor.forward_with_shift(batch.audio, batch.pitch_shift_semitones)
@@ -260,6 +280,17 @@ class Model(nn.Module):
         loss_guide = pitch_guide_loss(
             f0_probs=f0_probs,
             pitch_guide=pitch_guide,
+            hinge_margin=self.model_config.hinge_margin,
+        )
+
+        # Pitch Guide Shift Loss (L_g-shift)
+        pitch_guide_shifted = self.predictor.pitch_guide_generator.shift_pitch_guide(
+            pitch_guide, batch.pitch_shift_semitones
+        )
+
+        loss_g_shift = pitch_guide_shift_loss(
+            f0_probs_shifted=f0_probs_shifted,
+            pitch_guide_shifted=pitch_guide_shifted,
             hinge_margin=self.model_config.hinge_margin,
         )
 
@@ -330,7 +361,6 @@ class Model(nn.Module):
             )
 
         min_frames = min(t_f0, t_bap)
-        f0_values_aligned = f0_values[:, :min_frames]
         bap_upsampled_aligned = bap_upsampled[:, :min_frames, :]
 
         # V/UV DetectorのマスクをBAP損失用に時間軸統一
@@ -434,6 +464,7 @@ class Model(nn.Module):
             self.model_config.w_cons * loss_cons
             + self.model_config.w_bap * loss_bap
             + self.model_config.w_guide * loss_guide
+            + self.model_config.w_g_shift * loss_g_shift
             + self.model_config.w_pseudo * loss_pseudo
             + self.model_config.w_recon * loss_recon
             + self.model_config.w_aug * loss_aug
@@ -446,6 +477,7 @@ class Model(nn.Module):
             loss_cons=loss_cons,
             loss_bap=loss_bap,
             loss_guide=loss_guide,
+            loss_g_shift=loss_g_shift,
             loss_pseudo=loss_pseudo,
             loss_recon=loss_recon,
             loss_aug=loss_aug,

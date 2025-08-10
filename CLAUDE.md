@@ -10,8 +10,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - 動的バッチング未実装
   - `batch.py`/`dataset.py`: 固定長前提でのパディング。平均バッチサイズ17相当の効率化は今後の学習スケールで効く。
-- 真のスペクトル包絡推定器
-  - 現状lag-windowベース。将来的にはWORLD等に準拠したより高精度な包絡推定へ移行したい。
+- L_pseudo の S* 構成:
+  - 論文: S*=(E*_p ⊙ H ⊙ (1−A)) + (F(eap) ⊙ H ⊙ A)（式(5)）。
+  - 実装: `PseudoSpectrogramGenerator` はデフォルトで H=1, A=0 の想定で周期成分
+のみを返しており、`model.py` からは H, A を渡していない。そのため L_pseudo で比較する S* に H と A が掛かっていない。（論文より簡略化）
+- DDSP合成と L_recon の S˜ 構成:
+  - 論文: S˜ は F(ep), F(eap) をそれぞれ H と A で重み付けして合成（式(7)）。
+  - 実装: 時間領域で ep, eap に最小位相応答を適用後に合成→STFTでスペクトログラム→そこからさらに H と A を掛けて分離・合成しているため、式(7)の厳密な線形合成と異なる（非線形の実装差）。また F(ep), F(eap) を個別に周波数領域で合成する実装ではない。
 
 ### 残存タスクにあるけど必要か不要か判断して削除したいタスク
 
@@ -66,12 +71,17 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    L_g = (1/T) Σ max(1 - Σ P_t,f × G_t,f - m, 0)
    ```
 
-3. **Pseudo Spectrogram Loss (L_pseudo)**: F0 勾配最適化
+3. **Pitch Guide Shift Loss (L_g-shift)**: シフトされた絶対ピッチ学習
+   ```
+   L_g-shift = (1/T) Σ max(1 - Σ P_shift_t,f × G_t,f-Δf - m, 0)
+   ```
+
+4. **Pseudo Spectrogram Loss (L_pseudo)**: F0 勾配最適化
    ```
    L_pseudo = ||ψ(S*) - ψ(S)||₁ ⊙ (v × 1_K)
    ```
 
-4. **Reconstruction Loss (L_recon)**: GED による aperiodicity 最適化
+5. **Reconstruction Loss (L_recon)**: GED による aperiodicity 最適化
    ```
    L_recon = ||ψ(Š¹) – ψ(S)||₁ – α ||ψ(Š¹) – ψ(Š²)||₁
    ```
@@ -91,7 +101,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Optimizer: AdamW (lr=0.0002)
 - Dynamic batching (平均バッチサイズ17)
 - 学習ステップ: 100,000
-- 損失重み: L_cons, L_pseudo=10.0, L_recon=5.0, その他=1.0
+- 損失重み: L_cons, L_pseudo=10.0, L_recon=5.0, L_guide, L_g-shift, その他=1.0
 
 ### 曖昧な実装部分（要 FIXME コメント）
 - Triangle wave oscillator の具体的実装
@@ -518,6 +528,7 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 **🎯 SLASH論文実装完成状況**:
 - ✅ **L_cons** (相対ピッチ学習) - Pitch Consistency Loss - 論文Equation (1)準拠
 - ✅ **L_guide** (絶対ピッチ学習) - SHS事前分布による絶対ピッチ - 論文Equation (3)準拠
+- ✅ **L_g-shift** (シフト絶対ピッチ学習) - ピッチシフト版Pitch Guide損失 - 論文Section 2.3準拠
 - ✅ **L_pseudo** (F0勾配最適化) - 三角波振動子による微分可能スペクトログラム - 論文Equation (6)準拠
 - ✅ **L_recon** (Aperiodicity最適化) - GEDによる非周期性最適化 - 論文Equation (8)準拠
 - ✅ **V/UV Detector** (有声/無声判定) - 論文Equation (9)準拠
@@ -568,7 +579,6 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
   - align_corners=True設定の周波数ビン対応への影響検証
 - ⚠️ **未実装の重要機能**: 
   - Dynamic batching（可変長バッチ処理・平均バッチサイズ17）
-  - 真のスペクトル包絡推定器（現在は暫定的なlag-window実装）
 - ⚠️ **ノイズロバスト学習の実装課題**: 
   - 損失重みバランス調整の必要性（新規損失3種追加による全体バランス変化）
 - ⚠️ **バッチ処理設計**: pitch_shift_semitones==0での学習・評価分岐が不適切
@@ -605,13 +615,12 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 
 ### **🟢 低優先度** (最適化・発展機能)
 1. **DSPアルゴリズム精度向上** - 三角波振動子・SHS・最小位相応答の最適化
-2. **真のスペクトル包絡推定器実装** - 現在の暫定実装から本格実装への移行
-3. **メモリ・計算効率最適化** - 大規模バッチ・DDSP効率化・fine_structure最適化
+2. **メモリ・計算効率最適化** - 大規模バッチ・DDSP効率化・fine_structure最適化
 
 ## 📈 **学習・評価準備状況**
 
 ### ✅ **学習準備完了項目**
-- ✅ **SLASH核心損失8つの実装完了** (L_cons, L_guide, L_pseudo, L_recon, L_bap, L_aug, L_g-aug, L_ap)
+- ✅ **SLASH核心損失9つの実装完了** (L_cons, L_guide, L_g-shift, L_pseudo, L_recon, L_bap, L_aug, L_g-aug, L_ap)
 - ✅ **ノイズロバスト学習実装完了** (白色ノイズ付加・音量変更・論文Section 2.6完全準拠)
 - ✅ **全DSPモジュール実装完了** (PitchGuide, PseudoSpec, DDSP, VUVDetector)
 - ✅ **Predictor・Model統合完了** (論文準拠処理フロー・V/UVマスク処理)
@@ -903,7 +912,6 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 
 **曖昧な部分**: 
 - SHS のサブハーモニック次数と重み設定 (FIXME: 原論文の実装詳細確認)
-- Lag-window法の具体的パラメータ (FIXME: WORLD実装参照)
 
 #### 3.2 Pitch Guide Loss (L_g)
 **実装対象**: 絶対ピッチ事前分布損失

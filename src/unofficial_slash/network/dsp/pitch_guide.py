@@ -175,3 +175,40 @@ class PitchGuideGenerator(nn.Module):
         normalized_spectrum = shs_spectrum / max_vals
 
         return normalized_spectrum
+
+    def shift_pitch_guide(
+        self,
+        pitch_guide: Tensor,  # (B, T, F)
+        shift_semitones: Tensor,  # (B,)
+    ) -> Tensor:  # (B, T, F)
+        """周波数軸でPitch Guideをシフト"""
+        if torch.all(shift_semitones == 0):
+            return pitch_guide
+
+        batch_size, time_frames, freq_bins = pitch_guide.shape
+
+        # セミトーンを周波数ビンに変換
+        log_freq_range = math.log(self.f_max / self.f_min)
+        bins_per_semitone = freq_bins / (log_freq_range / math.log(2) * 12)
+        shift_bins = torch.round(shift_semitones * bins_per_semitone).to(torch.int)
+
+        # バッチごとに異なるシフトを適用
+        shifted_guides = []
+        for batch_idx in range(batch_size):
+            guide = pitch_guide[batch_idx]  # (T, F)
+            shift = shift_bins[batch_idx].item()
+
+            if shift == 0:
+                shifted_guides.append(guide)
+                continue
+
+            shifted_guide = torch.zeros_like(guide)
+
+            if shift > 0 and shift < freq_bins:
+                shifted_guide[:, :-shift] = guide[:, shift:]
+            elif shift < 0 and abs(shift) < freq_bins:
+                shifted_guide[:, abs(shift) :] = guide[:, :shift]
+
+            shifted_guides.append(shifted_guide)
+
+        return torch.stack(shifted_guides, dim=0)

@@ -78,6 +78,7 @@ class ModelConfig(BaseModel):
     # 基本損失重み
     w_cons: float
     w_guide: float
+    w_g_shift: float
     w_pseudo: float
     w_recon: float
     w_bap: float

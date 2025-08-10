@@ -58,6 +58,7 @@ model:
   # 基本損失重み
   w_cons: 10.0
   w_guide: 1.0
+  w_g_shift: 1.0
   w_pseudo: 10.0
   w_recon: 5.0
   w_bap: 0.1
