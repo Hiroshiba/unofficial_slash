@@ -331,15 +331,16 @@ class Model(nn.Module):
         # BAP線形補間（Pseudo Spectrogram生成前に計算）
         bap_upsampled = interpolate_bap_linear(bap, freq_bins)
 
+        # BAP(対数領域) -> aperiodicity(線形0-1) に変換
+        # 疑似スペクトログラム生成・V/UV判定の双方で線形領域を使用する
+        aperiodicity = torch.clamp(bap_to_aperiodicity(bap_upsampled), 0.0, 1.0)
+
         # 論文準拠Pseudo Spectrogram生成: S* = (E*_p ⊙ H ⊙ (1 − A)) + (F(eap) ⊙ H ⊙ A)
         pseudo_spectrogram = self.predictor.pseudo_spec_generator(
             f0_values=f0_values,
             spectral_envelope=spectral_envelope,
-            aperiodicity=bap_upsampled,
+            aperiodicity=aperiodicity,
         )
-
-        # VUVDetector用のみ線形振幅変換
-        aperiodicity = bap_to_aperiodicity(bap_upsampled)
 
         # V/UV Detector使用でV/UVマスク生成（L_pseudo用）
         _, _, _, vuv_mask = self.predictor.detect_vuv(
