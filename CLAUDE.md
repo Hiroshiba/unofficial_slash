@@ -11,18 +11,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 動的バッチング未実装
   - `batch.py`/`dataset.py`: 固定長前提でのパディング。平均バッチサイズ17相当の効率化は今後の学習スケールで効く。
 
-- DDSP合成と L_recon の S˜ 構成:
-  - 論文: S˜ は F(ep), F(eap) をそれぞれ H と A で重み付けして合成（式(7)）。
-  - 実装: 時間領域で ep, eap に最小位相応答を適用後に合成→STFTでスペクトログラム→そこからさらに H と A を掛けて分離・合成しているため、式(7)の厳密な線形合成と異なる（非線形の実装差）。また F(ep), F(eap) を個別に周波数領域で合成する実装ではない。
-
-### 残存タスクにあるけど必要か不要か判断して削除したいタスク
-
-
-- GED損失の2スペクトログラム生成
-  - `ddsp_synthesizer.generate_two_spectrograms`: 乱数シード以外の摂動設計（音響的に意味のある多様化）を検討。
-
-- DDSPSynthesizer.forward が式(7)を厳密には守っていないSLASH の再構成は𝑆~=(𝐹(𝑒𝑝)⊙𝐻⊙(1−𝐴))+(𝐹(𝑒𝑎𝑝)⊙𝐻⊙𝐴)S~ =(F(e p​ )⊙H⊙(1−A))+(F(e ap​ )⊙H⊙A)ですが、実装では periodic_excitation と aperiodic_excitation を最小位相化した後に時間領域で加算→ひとつだけ STFT→その振幅を 𝐻H と 𝐴A で按分しています。成分間の干渉（時間領域での合成 → 一発 STFT）が混入するので、厳密さという観点では 各成分を別々に STFT してから重ねる ほうが論文の式に忠実です。参考までに、WORLD をそのまま微分可能にした実装では STFT 領域で 𝑠𝑝sp​  と 𝑎𝑝ap を掛けて各成分を別々に合成しています（ℎ=𝐹−1[(1−𝑎𝑝)⋅𝑠𝑝⋅𝐹(𝑒ℎ)]h=F −1 [(1−ap)⋅ sp​ ⋅F(e h​ )], 𝑛=𝐹−1[𝑎𝑝⋅𝑠𝑝⋅𝐹(𝑒𝑛)]n=F −1 [ap⋅ sp​ ⋅F(e n​ )]）。
-
 ### 主要な特徴
 - 相対的なピッチ差学習（ピッチシフト利用）
 - DSP 由来の絶対ピッチ情報を活用
@@ -89,7 +77,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 1. **CQT 設定**: frame_shift=5ms, f_min=32.70Hz, 205bins, 24bins/octave, filter_scale=0.5
 2. **Pitch Guide**: fine structure spectrum → SHS → 正規化
 3. **Pseudo Spectrogram**: 三角波振動子 → 周期性励起スペクトログラム
-4. **DDSP 合成**: 時間領域での合成（必要に応じて最小位相応答を使用）
+4. **DDSP 合成**: 各成分を最小位相化→個別にSTFT→周波数領域で H/A を適用して合成（式(7)準拠）。
 
 ### 学習設定
 - Optimizer: AdamW (lr=0.0002)

@@ -204,21 +204,7 @@ class DDSPSynthesizer(nn.Module):
         aperiodicity: Tensor,  # (B, T, K) 非周期性
         random_seed: int | None = None,
     ) -> Tensor:
-        """
-        音声合成とスペクトログラム生成
-
-        Args:
-            f0_values: F0値 (B, T)
-            spectral_envelope: スペクトル包絡H (B, T, K)
-            aperiodicity: 非周期性A (B, T, K)
-            random_seed: 再現性のためのランダムシード
-
-        Returns
-        -------
-            合成スペクトログラムS˜ (B, T, K)
-        """
-        device = f0_values.device
-
+        """音声合成とスペクトログラム生成"""
         # 周期励起信号ep生成
         periodic_excitation = generate_periodic_excitation(
             f0_values=f0_values,
@@ -238,52 +224,22 @@ class DDSPSynthesizer(nn.Module):
         periodic_component = apply_minimum_phase_response(periodic_excitation)
         aperiodic_component = apply_minimum_phase_response(aperiodic_excitation)
 
-        # 時間領域音声合成
-        waveform = periodic_component + aperiodic_component  # (B, T, frame_length)
-        batch_size, time_frames, frame_length = waveform.shape
-
-        # フレーム信号を連続音声に連結してSTFTを適用
-        spectrogram = frames_to_continuous_stft(
-            frame_signals=waveform,
+        # スペクトログラム変換
+        periodic_spec = frames_to_continuous_stft(
+            frame_signals=periodic_component,
+            n_fft=self.n_fft,
+            hop_length=self.hop_length,
+        )
+        aperiodic_spec = frames_to_continuous_stft(
+            frame_signals=aperiodic_component,
             n_fft=self.n_fft,
             hop_length=self.hop_length,
         )
 
-        # 時間フレーム数を元の時間フレーム数に調整
-        if spectrogram.shape[1] != time_frames:
-            if spectrogram.shape[1] > time_frames:
-                spectrogram = spectrogram[:, :time_frames, :]
-            else:
-                # パディング
-                padding = time_frames - spectrogram.shape[1]
-                spectrogram = torch.cat(
-                    [
-                        spectrogram,
-                        torch.zeros(
-                            batch_size, padding, spectrogram.shape[-1], device=device
-                        ),
-                    ],
-                    dim=1,
-                )
+        periodic_filtered = periodic_spec * spectral_envelope * (1 - aperiodicity)
+        aperiodic_filtered = aperiodic_spec * spectral_envelope * aperiodicity
 
-        # Equation (7): S˜ = (F(ep) ⊙ H ⊙ (1 − A)) + (F(eap) ⊙ H ⊙ A)
-        # 周波数次元を調整
-        if spectrogram.shape[-1] != spectral_envelope.shape[-1]:
-            # 周波数ビン数を合わせる
-            target_bins = spectral_envelope.shape[-1]
-            if spectrogram.shape[-1] > target_bins:
-                spectrogram = spectrogram[:, :, :target_bins]
-            else:
-                padding = target_bins - spectrogram.shape[-1]
-                spectrogram = F.pad(spectrogram, (0, padding))
-
-        # 論文のEquation (7)に従ってスペクトログラム合成
-        periodic_spec = spectrogram * spectral_envelope * (1 - aperiodicity)
-        aperiodic_spec = spectrogram * spectral_envelope * aperiodicity
-
-        synthesized_spectrogram = periodic_spec + aperiodic_spec
-
-        return synthesized_spectrogram
+        return periodic_filtered + aperiodic_filtered
 
     def generate_two_spectrograms(
         self,

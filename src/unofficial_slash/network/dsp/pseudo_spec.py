@@ -105,15 +105,11 @@ class PseudoSpectrogramGenerator(nn.Module):
             n_fft=self.n_fft,
             hop_length=self.hop_length,
         )
-
         if aperiodic_freq.shape[-1] != spectral_envelope.shape[-1]:
-            if aperiodic_freq.shape[-1] > spectral_envelope.shape[-1]:
-                aperiodic_freq = aperiodic_freq[:, :, : spectral_envelope.shape[-1]]
-            else:
-                aperiodic_freq = F.pad(
-                    aperiodic_freq,
-                    (0, spectral_envelope.shape[-1] - aperiodic_freq.shape[-1]),
-                )
+            raise ValueError(
+                f"Frequency bins mismatch: aperiodic_freq={aperiodic_freq.shape[-1]} != H/A={spectral_envelope.shape[-1]}. "
+                f"Check n_fft/hop and generator settings."
+            )
 
         aperiodic_component = aperiodic_freq * spectral_envelope * aperiodicity
 
