@@ -8,9 +8,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### 優先度の高い残存タスク
 
-- pseudo_spec の三角波実装および最小位相応答の音響的検証（提案）
-  - 現状: `triangle_wave_oscillator` と `apply_minimum_phase_response` は FIXME の通り近似実装で理論整合の検証が未了。
-  - 提案: 式(4) の厳密性検証を実施。
+- 最小位相応答の音響的検証
+  - 課題: `apply_minimum_phase_response` の音響的妥当性検証（位相特性・再現性の確認）。
   
 - 動的バッチング未実装
   - `batch.py`/`dataset.py`: 固定長前提でのパディング。平均バッチサイズ17相当の効率化は今後の学習スケールで効く。
@@ -102,7 +101,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 損失重み: L_cons, L_pseudo=10.0, L_recon=5.0, L_guide, L_g-shift, その他=1.0
 
 ### 曖昧な実装部分（要 FIXME コメント）
-- Triangle wave oscillator の具体的実装
 - SHS アルゴリズムの詳細パラメータ
 - GED 損失の安定化手法
 - Dynamic batching の実装詳細

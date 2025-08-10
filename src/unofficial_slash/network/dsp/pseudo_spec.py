@@ -27,11 +27,7 @@ def triangle_wave_oscillator(
     f0_safe = torch.clamp(f0_values, min=1e-8)  # (B, T)
 
     # 位相計算: Φ_{t,k} = (f_s / (2 * p_t * K)) * k
-    # NOTE: フレーム間の位相連続性は考慮しない。本実装は振幅領域でのピーク整合を目的とするため、位相連続性は不要
-    # FIXME: 三角波振動子の実装精度問題 - 重要度：低
-    # 1. 論文Equation (4)の位相計算式との完全一致が未検証
-    # 2. 実際の周期信号として正しい三角波が生成されているか未検証
-    # 3. 論文の「4 |Φ - floor(Φ) - 0.5| - 1」との実装一致性の詳細検証要
+    # NOTE: フレーム間の位相連続性は考慮しない
     phase = (
         sample_rate
         / (2 * f0_safe.unsqueeze(-1) * n_freq_bins)
@@ -42,13 +38,9 @@ def triangle_wave_oscillator(
     # Φを0-1の範囲に正規化（フロア関数用）
     phase_normalized = phase - torch.floor(phase)  # (B, T, K)
 
-    # 三角波の条件分岐実装
-    # X = -1 if Φ < 0.5, else 4 |Φ - floor(Φ) - 0.5| - 1
-    triangle_wave = torch.where(
-        phase_normalized < 0.5,
-        torch.full_like(phase_normalized, -1.0),
-        4 * torch.abs(phase_normalized - 0.5) - 1,
-    )  # (B, T, K)
+    # 論文式の小数部定義に従う三角波
+    # X = 4 |{Φ} - 0.5| - 1, where {Φ} = Φ - floor(Φ)
+    triangle_wave = 4 * torch.abs(phase_normalized - 0.5) - 1  # (B, T, K)
 
     return triangle_wave
 
