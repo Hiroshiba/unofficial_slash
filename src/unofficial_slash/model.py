@@ -318,15 +318,8 @@ class Model(nn.Module):
                 f"1フレーム差は正常、2フレーム以上は設定確認が必要。"
             )
 
-        # F0値のみ勾配を残してPseudo Spectrogram生成
-        f0_for_pseudo = f0_values  # F0勾配最適化用
-
-        # Pseudo Spectrogram生成
-        pseudo_spectrogram = self.predictor.pseudo_spec_generator(f0_for_pseudo)
-
-        # スペクトル包絡推定（一度の計算で全ての損失関数で共用）
+        # スペクトル包絡推定（Pseudo Spectrogram生成前に計算）
         freq_bins = target_spectrogram.shape[-1]
-
         log_target_spec = torch.log(torch.clamp(target_spectrogram, min=1e-6))
         spectral_envelope = torch.exp(
             lag_window_spectral_envelope(
@@ -335,9 +328,15 @@ class Model(nn.Module):
             )
         )
 
-        # BAP線形補間（論文準拠実装） ✅ 効率性最適化完了
-        # SLASH論文 Section 2.2: "linearly interpolating B on the logarithmic amplitude"
+        # BAP線形補間（Pseudo Spectrogram生成前に計算）
         bap_upsampled = interpolate_bap_linear(bap, freq_bins)
+
+        # 論文準拠Pseudo Spectrogram生成: S* = (E*_p ⊙ H ⊙ (1 − A)) + (F(eap) ⊙ H ⊙ A)
+        pseudo_spectrogram = self.predictor.pseudo_spec_generator(
+            f0_values=f0_values,
+            spectral_envelope=spectral_envelope,
+            aperiodicity=bap_upsampled,
+        )
 
         # VUVDetector用のみ線形振幅変換
         aperiodicity = bap_to_aperiodicity(bap_upsampled)

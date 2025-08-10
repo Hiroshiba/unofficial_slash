@@ -6,11 +6,12 @@ SLASH論文における微分可能音声合成器
 """
 
 import math
-from typing import Tuple
 
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
+
+from .audio_processing import frames_to_continuous_stft
 
 
 def generate_periodic_excitation(
@@ -256,33 +257,14 @@ class DDSPSynthesizer(nn.Module):
 
         # 時間領域音声合成
         waveform = periodic_component + aperiodic_component  # (B, T, frame_length)
-
-        # フレームを連結して連続音声にする
         batch_size, time_frames, frame_length = waveform.shape
 
-        # フレームを重複させながら連結（hop_length分ずつシフト）
-        total_length = (time_frames - 1) * self.hop_length + frame_length
-        continuous_waveform = torch.zeros(batch_size, total_length, device=device)
-
-        for t in range(time_frames):
-            start_idx = t * self.hop_length
-            end_idx = start_idx + frame_length
-            if end_idx <= total_length:
-                continuous_waveform[:, start_idx:end_idx] += waveform[:, t, :]
-
-        # 連続音声に対してSTFT変換
-        stft_result = torch.stft(
-            continuous_waveform,
+        # フレーム信号を連続音声に連結してSTFTを適用
+        spectrogram = frames_to_continuous_stft(
+            frame_signals=waveform,
             n_fft=self.n_fft,
             hop_length=self.hop_length,
-            window=torch.hann_window(self.n_fft, device=device),
-            return_complex=True,
-            center=True,
         )
-
-        spectrogram = torch.abs(stft_result).transpose(
-            -1, -2
-        )  # (B, freq_bins, T) -> (B, T, freq_bins)
 
         # 時間フレーム数を元の時間フレーム数に調整
         if spectrogram.shape[1] != time_frames:

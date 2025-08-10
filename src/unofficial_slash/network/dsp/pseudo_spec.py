@@ -1,15 +1,16 @@
-"""
-Pseudo Spectrogram Generator
-
-SLASH論文における微分可能スペクトログラム生成
-三角波振動子によるPseudo Periodic Excitationの実装
-"""
+"""SLASH論文における微分可能スペクトログラム生成"""
 
 import math
 
 import torch
 import torch.nn.functional as F
 from torch import Tensor, nn
+
+from .audio_processing import frames_to_continuous_stft
+from .ddsp_synthesizer import (
+    apply_minimum_phase_response,
+    generate_aperiodic_excitation,
+)
 
 
 def triangle_wave_oscillator(
@@ -83,75 +84,85 @@ class PseudoSpectrogramGenerator(nn.Module):
         self,
         sample_rate: int,
         n_freq_bins: int,
-        epsilon: float = 0.001,
+        epsilon: float,
+        n_fft: int,
+        hop_length: int,
     ):
         super().__init__()
         self.sample_rate = sample_rate
         self.n_freq_bins = n_freq_bins
         self.epsilon = epsilon
+        self.n_fft = n_fft
+        self.hop_length = hop_length
+        self.frame_length = hop_length * 4
 
     def forward(
         self,
-        f0_values: Tensor,  # (B, T) F0値
-        spectral_envelope: Tensor | None = None,  # (B, T, K) スペクトル包絡
-        aperiodicity: Tensor | None = None,  # (B, T, K) 非周期性
-    ) -> Tensor:
-        """
-        F0値からPseudo Spectrogramを生成
+        *,
+        f0_values: Tensor,  # (B, T)
+        spectral_envelope: Tensor,  # (B, T, K)
+        aperiodicity: Tensor,  # (B, T, K)
+    ) -> Tensor:  # (B, T, K)
+        """SLASH論文式(5)準拠のPseudo Spectrogram生成"""
+        if f0_values.dim() != 2:
+            raise ValueError(f"f0_values must be 2D tensor, got {f0_values.dim()}D")
+        if spectral_envelope.dim() != 3:
+            raise ValueError(
+                f"spectral_envelope must be 3D tensor, got {spectral_envelope.dim()}D"
+            )
+        if aperiodicity.dim() != 3:
+            raise ValueError(
+                f"aperiodicity must be 3D tensor, got {aperiodicity.dim()}D"
+            )
 
-        Args:
-            f0_values: F0値 (B, T)
-            spectral_envelope: スペクトル包絡 H (B, T, K)
-            aperiodicity: 非周期性 A (B, T, K)
-
-        Returns
-        -------
-            Pseudo Spectrogram S* (B, T, K)
-        """
         batch_size, time_frames = f0_values.shape
         device = f0_values.device
 
-        # 三角波振動子
         triangle_wave = triangle_wave_oscillator(
             f0_values, self.sample_rate, self.n_freq_bins, self.epsilon
         )
-
-        # Pseudo Periodic Excitation
         pseudo_excitation = pseudo_periodic_excitation(triangle_wave, self.epsilon)
 
-        # スペクトル包絡が提供されていない場合は全周波数で1とする
-        if spectral_envelope is None:
-            spectral_envelope = torch.ones(
-                batch_size, time_frames, self.n_freq_bins, device=device
-            )
-
-        # 非周期性が提供されていない場合は全て周期成分（A=0）とする
-        if aperiodicity is None:
-            aperiodicity = torch.zeros(
-                batch_size, time_frames, self.n_freq_bins, device=device
-            )
-
-        # Pseudo Spectrogram: S* = (E*_p ⊙ H ⊙ (1 - A)) + (F(e_ap) ⊙ H ⊙ A)
-        # 現段階では周期成分のみ（非周期成分 F(e_ap) は Phase 4b で実装予定）
         periodic_component = pseudo_excitation * spectral_envelope * (1 - aperiodicity)
 
-        # FIXME: 非周期成分 F(e_ap) の実装は Phase 4b (DDSP Synthesizer) で実装
-        # 現在は周期成分のみを返す
-        aperiodic_component = torch.zeros_like(periodic_component)
+        aperiodic_excitation = generate_aperiodic_excitation(
+            aperiodicity=aperiodicity,
+            frame_length=self.frame_length,
+        )
+        aperiodic_with_phase = apply_minimum_phase_response(aperiodic_excitation)
 
-        pseudo_spectrogram = periodic_component + aperiodic_component
+        aperiodic_freq = frames_to_continuous_stft(
+            frame_signals=aperiodic_with_phase,
+            n_fft=self.n_fft,
+            hop_length=self.hop_length,
+        )
 
-        return pseudo_spectrogram
+        if aperiodic_freq.shape[-1] != spectral_envelope.shape[-1]:
+            if aperiodic_freq.shape[-1] > spectral_envelope.shape[-1]:
+                aperiodic_freq = aperiodic_freq[:, :, : spectral_envelope.shape[-1]]
+            else:
+                aperiodic_freq = F.pad(
+                    aperiodic_freq,
+                    (0, spectral_envelope.shape[-1] - aperiodic_freq.shape[-1]),
+                )
+
+        aperiodic_component = aperiodic_freq * spectral_envelope * aperiodicity
+
+        return periodic_component + aperiodic_component
 
 
 def create_pseudo_spec_generator(
     sample_rate: int,
     n_freq_bins: int,
-    epsilon: float = 0.001,
+    epsilon: float,
+    n_fft: int,
+    hop_length: int,
 ) -> PseudoSpectrogramGenerator:
     """設定からPseudoSpectrogramGeneratorを作成"""
     return PseudoSpectrogramGenerator(
         sample_rate=sample_rate,
         n_freq_bins=n_freq_bins,
         epsilon=epsilon,
+        n_fft=n_fft,
+        hop_length=hop_length,
     )

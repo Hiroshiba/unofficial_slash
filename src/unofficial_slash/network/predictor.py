@@ -119,8 +119,10 @@ class Predictor(nn.Module):
         # Pseudo Spectrogram Generator初期化
         self.pseudo_spec_generator = PseudoSpectrogramGenerator(
             sample_rate=sample_rate,
-            n_freq_bins=network_config.pseudo_spec_n_fft // 2 + 1,  # STFTの周波数ビン数
+            n_freq_bins=network_config.pseudo_spec_n_fft // 2 + 1,
             epsilon=network_config.pseudo_spec_epsilon,
+            n_fft=network_config.pseudo_spec_n_fft,
+            hop_length=network_config.pseudo_spec_hop_length,
         )
 
         # DDSP Synthesizer初期化

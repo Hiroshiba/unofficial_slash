@@ -6,14 +6,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 このリポジトリは「SLASH: Self-Supervised Speech Pitch Estimation Leveraging DSP-derived Absolute Pitch」論文の実装です。SLASH は自己教師あり学習（SSL）と従来のデジタル信号処理（DSP）を組み合わせて、音声の基本周波数（F0）推定を行う手法です。
 
+### 🚨 緊急対応必要な問題
+
+- **L_pseudo 数値不安定性問題** ⚠️ **2025-01-22発見**
+  - 問題: `model.py:338`で`aperiodicity=bap_upsampled`（対数領域）を渡すが、`pseudo_spec.py:123,146`では線形領域（0-1値域）として使用
+  - 影響: `1 - aperiodicity`が負値になり、極端な値による数値不安定性で`loss is NaN`発生
+  - 解決案: `aperiodicity = bap_to_aperiodicity(bap_upsampled)`で線形変換してから渡す
+  - **学習実行を阻害する最優先修正項目**
+
 ### 優先度の高い残存タスク
 
 - 動的バッチング未実装
   - `batch.py`/`dataset.py`: 固定長前提でのパディング。平均バッチサイズ17相当の効率化は今後の学習スケールで効く。
-- L_pseudo の S* 構成:
-  - 論文: S*=(E*_p ⊙ H ⊙ (1−A)) + (F(eap) ⊙ H ⊙ A)（式(5)）。
-  - 実装: `PseudoSpectrogramGenerator` はデフォルトで H=1, A=0 の想定で周期成分
-のみを返しており、`model.py` からは H, A を渡していない。そのため L_pseudo で比較する S* に H と A が掛かっていない。（論文より簡略化）
 - DDSP合成と L_recon の S˜ 構成:
   - 論文: S˜ は F(ep), F(eap) をそれぞれ H と A で重み付けして合成（式(7)）。
   - 実装: 時間領域で ep, eap に最小位相応答を適用後に合成→STFTでスペクトログラム→そこからさらに H と A を掛けて分離・合成しているため、式(7)の厳密な線形合成と異なる（非線形の実装差）。また F(ep), F(eap) を個別に周波数領域で合成する実装ではない。
