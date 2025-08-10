@@ -231,12 +231,11 @@ def interpolate_bap_linear(bap: Tensor, freq_bins: int) -> Tensor:
     return bap_interpolated.view(batch_size, time_steps, freq_bins)
 
 
-def bap_to_aperiodicity(bap_upsampled: Tensor) -> Tensor:
-    """BAPから線形振幅aperiodicityに変換（VUVDetector用）"""
-    # FIXME: exp変換の数値安定性 - 重要度：中
-    # 1. 対数振幅から線形振幅への変換でexpが適切だが発散の可能性
-    # 2. clampによる値域制限の必要性検討
-    return torch.exp(torch.clamp(bap_upsampled, max=10.0))
+def bap_to_aperiodicity(bap: Tensor, min_val: float, max_val: float) -> Tensor:
+    """BAP(log scale) -> linear aperiodicity with offset scaling"""
+    clamped_bap = torch.clamp(bap, min=min_val, max=max_val)
+    linear_amplitude = torch.exp(clamped_bap - max_val)
+    return linear_amplitude
 
 
 class Model(nn.Module):
@@ -331,9 +330,11 @@ class Model(nn.Module):
         # BAP線形補間（Pseudo Spectrogram生成前に計算）
         bap_upsampled = interpolate_bap_linear(bap, freq_bins)
 
-        # BAP(対数領域) -> aperiodicity(線形0-1) に変換
+        # BAP(対数領域) -> aperiodicity(線形振幅) に変換
         # 疑似スペクトログラム生成・V/UV判定の双方で線形領域を使用する
-        aperiodicity = torch.clamp(bap_to_aperiodicity(bap_upsampled), 0.0, 1.0)
+        aperiodicity = bap_to_aperiodicity(
+            bap_upsampled, self.model_config.bap_min, self.model_config.bap_max
+        )
 
         # 論文準拠Pseudo Spectrogram生成: S* = (E*_p ⊙ H ⊙ (1 − A)) + (F(eap) ⊙ H ⊙ A)
         pseudo_spectrogram = self.predictor.pseudo_spec_generator(

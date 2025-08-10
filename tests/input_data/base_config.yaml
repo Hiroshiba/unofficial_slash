@@ -78,6 +78,10 @@ model:
   f0_min: 20.0
   f0_max: 2000.0
 
+  # BAP値域設定
+  bap_min: -6.907755  # -60dB相当
+  bap_max: 2.302585   # 20dB相当
+
   # ノイズロバスト化
   noise_snr_db_min: -6.0
   noise_snr_db_max: 20.0

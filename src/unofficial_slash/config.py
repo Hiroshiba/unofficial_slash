@@ -83,25 +83,29 @@ class ModelConfig(BaseModel):
     w_recon: float
     w_bap: float
 
-    # ノイズロバスト損失重み (SLASH論文 Section 2.6)
-    w_aug: float  # L_aug: 拡張データでの基本損失重み
-    w_g_aug: float  # L_g-aug: 拡張データでのPitch Guide損失重み
-    w_ap: float  # L_ap: Aperiodicity一貫性損失重み
+    # ノイズロバスト損失重み
+    w_aug: float
+    w_g_aug: float
+    w_ap: float
 
     # 損失パラメータ
     hinge_margin: float
     ged_alpha: float
     epsilon: float
-    huber_delta: float  # Pitch Consistency Loss用のHuber損失デルタ
+    huber_delta: float
 
     # F0境界値
-    f0_min: float  # 人間の音声の最低F0 (Hz)
-    f0_max: float  # 人間の音声の最高F0 (Hz)
+    f0_min: float
+    f0_max: float
 
-    # ノイズロバスト化設定 (SLASH論文 Section 2.6)
-    noise_snr_db_min: float  # 最大ノイズレベル (SNR dB)
-    noise_snr_db_max: float  # 最小ノイズレベル (SNR dB)
-    volume_change_db_range: float  # 音量変更範囲 (±dB)
+    # BAP値域設定
+    bap_min: float
+    bap_max: float
+
+    # ノイズロバスト化設定
+    noise_snr_db_min: float
+    noise_snr_db_max: float
+    volume_change_db_range: float
 
 
 class TrainConfig(BaseModel):
