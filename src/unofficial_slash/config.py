@@ -86,7 +86,6 @@ class ModelConfig(BaseModel):
     w_g_shift: float
     w_pseudo: float
     w_recon: float
-    w_bap: float
 
     # ノイズロバスト損失重み
     w_aug: float

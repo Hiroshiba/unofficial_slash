@@ -15,11 +15,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    - ほとんどで対数確率を持っておいて、最後でF.softmaxすべき
    - 紛らわしいので名称を全て統一したい、`0~1`はprobsで良いけどそのsoftmaxかける前のはlogits的なのにしたい
 
-- `forward_with_shift`の結果の`bap_shifted`を使っていない
-
-- BAP損失計算の不整合性がなんかおかしい気がする
-  - このlossをどう取るのが正解なのか調べて正すのが良さそう
-
 ### 主要な特徴
 - 相対的なピッチ差学習（ピッチシフト利用）
 - DSP 由来の絶対ピッチ情報を活用
@@ -78,7 +73,20 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    ```
 
 ### 補助損失
-- L_aug, L_g-aug, L_ap: ノイズロバスト性向上
+### ノイズロバスト損失（Section 2.6準拠）
+6. **L_aug**: 拡張データでの基本損失（Huber loss between p and p_aug）
+   ```
+   L_aug = ||p - p_aug||₁
+   ```
+7. **L_g-aug**: 拡張データでのPitch Guide損失（P_augを使用したL_gと同等）
+   ```
+   L_g-aug = (1/T) Σ max(1 - Σ P_aug_t,f × G_t,f - m, 0)
+   ```
+8. **L_ap**: Aperiodicity一貫性損失（`||log(A_aug) - 
+   og(A)||₁`）
+79    
+**実装状況**: SLASH論文準拠の全8種類損失を完全実装済み
+
 
 ## 実装上の重要ポイント
 

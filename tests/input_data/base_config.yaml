@@ -63,7 +63,6 @@ model:
   w_g_shift: 1.0
   w_pseudo: 10.0
   w_recon: 5.0
-  w_bap: 0.1
 
   # ノイズロバスト損失重み
   w_aug: 1.0

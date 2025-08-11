@@ -26,7 +26,6 @@ class ModelOutput(DataNumProtocol):
 
     # 基本SLASH損失項目
     loss_cons: Tensor  # Pitch Consistency Loss (L_cons)
-    loss_bap: Tensor  # Band Aperiodicity Loss
     loss_guide: Tensor  # Pitch Guide Loss (L_guide)
     loss_g_shift: Tensor  # Pitch Guide Shift Loss (L_g-shift)
     loss_pseudo: Tensor  # Pseudo Spectrogram Loss (L_pseudo)
@@ -67,13 +66,13 @@ def pitch_consistency_loss(
 
 
 def pitch_guide_loss(
-    f0_probs: Tensor,  # (B, T, F) F0確率分布
-    pitch_guide: Tensor,  # (B, T, F) Pitch Guide
+    f0_probs: Tensor,  # (B, T, ?) F0確率分布
+    pitch_guide: Tensor,  # (B, T, ?) Pitch Guide
     hinge_margin: float,  # ヒンジ損失のマージン
 ) -> Tensor:
     """Pitch Guide Loss (L_guide) - SLASH論文 Equation (3)"""
     # F0確率分布をsoftmaxで正規化（論文の確率分布Pとして扱う）
-    normalized_probs = F.softmax(f0_probs, dim=-1)  # (B, T, F)
+    normalized_probs = F.softmax(f0_probs, dim=-1)  # (B, T, ?)
 
     # P と G の内積を計算（各フレームごと）
     inner_product = torch.sum(normalized_probs * pitch_guide, dim=-1)  # (B, T)
@@ -258,7 +257,6 @@ class Model(nn.Module):
             bap,  # (B, T, ?)
             f0_probs_shifted,  # (B, T, ?) - L_g-shift用
             f0_values_shifted,  # (B, T)
-            _,  # bap_shifted - Phase 4b以降で使用予定
         ) = self.predictor.forward_with_shift(batch.audio, batch.pitch_shift_semitones)
 
         # Pitch Consistency Loss (L_cons) - SLASH論文 Equation (1)
@@ -326,7 +324,7 @@ class Model(nn.Module):
         )
 
         # 対数振幅空間でのBAP線形補間
-        bap_upsampled, aperiodicity = interpolate_bap_log_space(bap, freq_bins)
+        _, aperiodicity = interpolate_bap_log_space(bap, freq_bins)
 
         # 論文準拠Pseudo Spectrogram生成: S* = (E*_p ⊙ H ⊙ (1 − A)) + (F(eap) ⊙ H ⊙ A)
         pseudo_spectrogram = self.predictor.pseudo_spec_generator(
@@ -353,22 +351,7 @@ class Model(nn.Module):
                 f"1フレーム差は正常（nnAudio CQTとtorch.stftの実装方式差）、2フレーム以上は異常。"
             )
 
-        min_frames = min(t_f0, t_aperiodicity)
 
-        # V/UV DetectorのマスクをBAP損失用に時間軸統一
-        # vuv_maskは確率値なので、boolean化する
-        voiced_mask_target = vuv_mask[:, :min_frames] > 0.5
-
-        # 対数空間での適切なBAP損失: 有声=log(eps), 無声=log(1)=0
-        bap_upsampled_aligned = bap_upsampled[:, :min_frames, :]
-        eps = 1e-7
-        log_eps = torch.log(torch.tensor(eps, device=bap_upsampled_aligned.device))
-        bap_target = torch.where(
-            voiced_mask_target.unsqueeze(-1),
-            torch.full_like(bap_upsampled_aligned, log_eps.item()),
-            torch.zeros_like(bap_upsampled_aligned),
-        )
-        loss_bap = huber_loss(bap_upsampled_aligned, bap_target)
 
         # L_pseudo損失
         loss_pseudo = pseudo_spectrogram_loss(
@@ -458,7 +441,6 @@ class Model(nn.Module):
         # 3. 学習安定性・収束速度への影響要検証（特にw_aug, w_g_aug, w_ap）
         total_loss = (
             self.model_config.w_cons * loss_cons
-            + self.model_config.w_bap * loss_bap
             + self.model_config.w_guide * loss_guide
             + self.model_config.w_g_shift * loss_g_shift
             + self.model_config.w_pseudo * loss_pseudo
@@ -471,7 +453,6 @@ class Model(nn.Module):
         return ModelOutput(
             loss=total_loss,
             loss_cons=loss_cons,
-            loss_bap=loss_bap,
             loss_guide=loss_guide,
             loss_g_shift=loss_g_shift,
             loss_pseudo=loss_pseudo,

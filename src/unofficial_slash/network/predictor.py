@@ -173,8 +173,8 @@ class Predictor(nn.Module):
         audio: Tensor,  # (B, T)
         shift_semitones: Tensor,  # (B,)
     ) -> tuple[
-        Tensor, Tensor, Tensor, Tensor, Tensor, Tensor
-    ]:  # (B, T, ?), (B, T), (B, T, ?), (B, T, ?), (B, T), (B, T, ?)
+        Tensor, Tensor, Tensor, Tensor, Tensor
+    ]:  # (B, T, ?), (B, T), (B, T, ?), (B, T, ?), (B, T)
         """学習用: audio -> CQT -> shift -> encode both"""
         # GPU対応CQT変換
         cqt_full = self.cqt_transform(audio)  # (B, cqt_total_bins, T)
@@ -191,7 +191,7 @@ class Predictor(nn.Module):
 
         # 両方を推定
         f0_probs_orig, f0_values_orig, bap_orig = self.encode_cqt(cqt_central)
-        f0_probs_shift, f0_values_shift, bap_shift = self.encode_cqt(cqt_shifted)
+        f0_probs_shift, f0_values_shift, _ = self.encode_cqt(cqt_shifted)
 
         return (
             f0_probs_orig,
@@ -199,7 +199,6 @@ class Predictor(nn.Module):
             bap_orig,
             f0_probs_shift,
             f0_values_shift,
-            bap_shift,
         )
 
     def encode_cqt(
