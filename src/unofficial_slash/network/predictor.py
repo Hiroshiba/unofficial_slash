@@ -23,14 +23,14 @@ def create_log_frequency_scale(f0_bins: int, fmin: float, fmax: float) -> Tensor
     return torch.exp(log_freqs)  # (f0_bins,)
 
 
-def f0_probs_to_f0(f0_probs: Tensor, frequency_scale: Tensor) -> Tensor:
-    """F0確率分布から重み付き平均でF0値を計算"""
-    # f0_probs: (B, T, f0_bins)
+def f0_logits_to_f0(f0_logits: Tensor, frequency_scale: Tensor) -> Tensor:
+    """F0ロジット分布から重み付き平均でF0値を計算"""
+    # f0_logits: (B, T, f0_bins)
     # frequency_scale: (f0_bins,)
     # 戻り値: (B, T)
 
     # softmaxで正規化してから重み付き平均
-    normalized_probs = F.softmax(f0_probs, dim=-1)  # (B, T, f0_bins)
+    normalized_probs = F.softmax(f0_logits, dim=-1)  # (B, T, f0_bins)
 
     # 重み付き平均計算
     f0_values = torch.sum(
@@ -190,14 +190,14 @@ class Predictor(nn.Module):
         )  # (B, 176, T)
 
         # 両方を推定
-        f0_probs_orig, f0_values_orig, bap_orig = self.encode_cqt(cqt_central)
-        f0_probs_shift, f0_values_shift, _ = self.encode_cqt(cqt_shifted)
+        f0_logits_orig, f0_values_orig, bap_orig = self.encode_cqt(cqt_central)
+        f0_logits_shift, f0_values_shift, _ = self.encode_cqt(cqt_shifted)
 
         return (
-            f0_probs_orig,
+            f0_logits_orig,
             f0_values_orig,
             bap_orig,
-            f0_probs_shift,
+            f0_logits_shift,
             f0_values_shift,
         )
 
@@ -210,12 +210,12 @@ class Predictor(nn.Module):
         cqt_transposed = cqt.transpose(1, 2)  # (B, T, 176)
 
         # NANSY++ Pitch Encoder
-        f0_probs, bap = self.pitch_encoder(cqt_transposed)  # (B, T/4, ?), (B, T/4, ?)
+        f0_logits, bap = self.pitch_encoder(cqt_transposed)  # (B, T, ?), (B, T, ?)
 
-        # F0確率分布から実際のF0値を計算
-        f0_values = f0_probs_to_f0(f0_probs, self.frequency_scale)
+        # F0ロジット分布から実際のF0値を計算
+        f0_values = f0_logits_to_f0(f0_logits, self.frequency_scale)
 
-        return f0_probs, f0_values, bap
+        return f0_logits, f0_values, bap
 
     def detect_vuv(
         self,

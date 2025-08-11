@@ -66,13 +66,13 @@ def pitch_consistency_loss(
 
 
 def pitch_guide_loss(
-    f0_probs: Tensor,  # (B, T, ?) F0確率分布
+    f0_logits: Tensor,  # (B, T, ?) F0ロジット分布
     pitch_guide: Tensor,  # (B, T, ?) Pitch Guide
     hinge_margin: float,  # ヒンジ損失のマージン
 ) -> Tensor:
     """Pitch Guide Loss (L_guide) - SLASH論文 Equation (3)"""
-    # F0確率分布をsoftmaxで正規化（論文の確率分布Pとして扱う）
-    normalized_probs = F.softmax(f0_probs, dim=-1)  # (B, T, ?)
+    # F0ロジットをsoftmaxで正規化（論文の確率分布Pとして扱う）
+    normalized_probs = F.softmax(f0_logits, dim=-1)  # (B, T, ?)
 
     # P と G の内積を計算（各フレームごと）
     inner_product = torch.sum(normalized_probs * pitch_guide, dim=-1)  # (B, T)
@@ -87,12 +87,12 @@ def pitch_guide_loss(
 
 
 def pitch_guide_shift_loss(
-    f0_probs_shifted: Tensor,  # (B, T, F) シフトされたF0確率分布
+    f0_logits_shifted: Tensor,  # (B, T, F) シフトされたF0ロジット分布
     pitch_guide_shifted: Tensor,  # (B, T, F) シフトされたPitch Guide
     hinge_margin: float,  # ヒンジ損失のマージン
 ) -> Tensor:
     """Pitch Guide Shift Loss (L_g-shift) - SLASH論文 Section 2.3"""
-    normalized_probs_shifted = F.softmax(f0_probs_shifted, dim=-1)  # (B, T, F)
+    normalized_probs_shifted = F.softmax(f0_logits_shifted, dim=-1)  # (B, T, F)
 
     inner_product = torch.sum(
         normalized_probs_shifted * pitch_guide_shifted, dim=-1
@@ -252,10 +252,10 @@ class Model(nn.Module):
 
         # forward_with_shift()を常に使用（学習専用の統一フロー）
         (
-            f0_probs,  # (B, T, ?)
+            f0_logits,  # (B, T, ?)
             f0_values,  # (B, T)
             bap,  # (B, T, ?)
-            f0_probs_shifted,  # (B, T, ?) - L_g-shift用
+            f0_logits_shifted,  # (B, T, ?) - L_g-shift用
             f0_values_shifted,  # (B, T)
         ) = self.predictor.forward_with_shift(batch.audio, batch.pitch_shift_semitones)
 
@@ -273,7 +273,7 @@ class Model(nn.Module):
         pitch_guide = self.predictor.pitch_guide_generator(batch.audio)  # (B, T, F)
 
         loss_guide = pitch_guide_loss(
-            f0_probs=f0_probs,
+            f0_logits=f0_logits,
             pitch_guide=pitch_guide,
             hinge_margin=self.model_config.hinge_margin,
         )
@@ -284,7 +284,7 @@ class Model(nn.Module):
         )
 
         loss_g_shift = pitch_guide_shift_loss(
-            f0_probs_shifted=f0_probs_shifted,
+            f0_logits_shifted=f0_logits_shifted,
             pitch_guide_shifted=pitch_guide_shifted,
             hinge_margin=self.model_config.hinge_margin,
         )
@@ -351,8 +351,6 @@ class Model(nn.Module):
                 f"1フレーム差は正常（nnAudio CQTとtorch.stftの実装方式差）、2フレーム以上は異常。"
             )
 
-
-
         # L_pseudo損失
         loss_pseudo = pseudo_spectrogram_loss(
             pseudo_spectrogram=pseudo_spectrogram,
@@ -404,7 +402,7 @@ class Model(nn.Module):
         )
 
         # 2. 拡張データでの推論: p_aug, P_aug, A_aug を取得
-        f0_probs_aug, f0_values_aug, bap_aug = self.predictor(audio_aug_volume)
+        f0_logits_aug, f0_values_aug, bap_aug = self.predictor(audio_aug_volume)
 
         # 3. L_aug損失: p と p_aug のHuber損失 (論文 Section 2.6)
         # "The first loss L_aug is similar to L_cons, which is defined as the Huber norm between p and p_aug"
@@ -416,7 +414,7 @@ class Model(nn.Module):
         # "The second loss L_g-aug is almost the same as L_g, except that P is substituted with P_aug"
         pitch_guide_aug = self.predictor.pitch_guide_generator(audio_aug_volume)
         loss_g_aug = pitch_guide_loss(
-            f0_probs=f0_probs_aug,
+            f0_logits=f0_logits_aug,
             pitch_guide=pitch_guide_aug,
             hinge_margin=self.model_config.hinge_margin,
         )

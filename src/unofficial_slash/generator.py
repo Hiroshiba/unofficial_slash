@@ -18,7 +18,7 @@ class GeneratorOutput:
     """生成したデータ"""
 
     f0_values: Tensor  # (B, T)
-    f0_probs: Tensor  # (B, T, F)
+    f0_logits: Tensor  # (B, T, F)
     bap_values: Tensor  # (B, T, bap_bins)
 
 
@@ -61,10 +61,10 @@ class Generator(nn.Module):
         audio_tensor = to_tensor(audio, self.device)
 
         # PredictorでF0推定を実行
-        f0_probs, f0_values, bap_values = self.predictor(audio_tensor)
+        f0_logits, f0_values, bap_values = self.predictor(audio_tensor)
 
         return GeneratorOutput(
             f0_values=f0_values,
-            f0_probs=f0_probs,
+            f0_logits=f0_logits,
             bap_values=bap_values,
         )

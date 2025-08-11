@@ -11,10 +11,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 動的バッチング未実装
   - `batch.py`/`dataset.py`: 固定長前提でのパディング。平均バッチサイズ17相当の効率化は今後の学習スケールで効く。
 
-- f0確率分布のF.softmaxをやりすぎ
-   - ほとんどで対数確率を持っておいて、最後でF.softmaxすべき
-   - 紛らわしいので名称を全て統一したい、`0~1`はprobsで良いけどそのsoftmaxかける前のはlogits的なのにしたい
-
 ### 主要な特徴
 - 相対的なピッチ差学習（ピッチシフト利用）
 - DSP 由来の絶対ピッチ情報を活用

@@ -113,11 +113,11 @@ class NansyPitchEncoder(nn.Module):
 
         x, _ = self.gru(x)  # (B, T, ?)
 
-        f0_probs = self.f0_head(x)  # (B, T, ?)
+        f0_logits = self.f0_head(x)  # (B, T, ?)
         bap = self.bap_head(x)  # (B, T, ?)
 
         bap = (
             1.0 * torch.sigmoid(bap) ** math.log(10.0) + 1e-7
         )  # NOTE: NANSY++論文では係数`2.0`をかけるが、bapは値域が`[0, 1]`であるため1.0をかける
 
-        return f0_probs, bap
+        return f0_logits, bap

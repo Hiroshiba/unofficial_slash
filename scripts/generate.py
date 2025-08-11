@@ -79,7 +79,7 @@ def generate(
         np.savez_compressed(
             output_file,
             f0_values=generator_output.f0_values.cpu().numpy(),
-            f0_probs=generator_output.f0_probs.cpu().numpy(),
+            f0_logits=generator_output.f0_logits.cpu().numpy(),
             bap_values=generator_output.bap_values.cpu().numpy(),
             audio_shape=batch.audio.shape,
             pitch_shift=batch.pitch_shift_semitones.cpu().numpy(),
