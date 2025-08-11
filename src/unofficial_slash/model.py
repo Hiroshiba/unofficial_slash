@@ -369,10 +369,6 @@ class Model(nn.Module):
             )
         )
 
-        # FIXME: GED α パラメータのバランス検証 - 重要度：中
-        # 1. 現在のged_alpha=0.1は論文値だが実装特有の調整が未検証
-        # 2. 他の損失重みとのバランス調整が必要な可能性
-        # 3. 学習安定性への影響・収束速度への影響が未確認
         loss_recon = reconstruction_loss(
             generated_spec_1=generated_spec_1,
             generated_spec_2=generated_spec_2,
@@ -381,13 +377,7 @@ class Model(nn.Module):
             window_size=self.predictor.pitch_guide_generator.window_size,
         )
 
-        # ========================================
-        # ノイズロバスト損失計算 (SLASH論文 Section 2.6)
-        # FIXME: ノイズロバスト学習の計算効率問題 - 重要度：高
-        # 1. 元データ + 拡張データで2回推論するため学習時間が約2倍に増大
-        # 2. メモリ使用量も拡張データ分増加（大規模バッチでOOMリスク）
-        # 3. 論文準拠だが実用性とのトレードオフ検討が必要
-        # ========================================
+        # ノイズロバスト損失計算
 
         # 1. ノイズ付加・音量変更による音声拡張
         # C_aug = CQT(w_aug) where w_aug は ノイズ付加+音量変更された音声
@@ -420,10 +410,6 @@ class Model(nn.Module):
         )
 
         # 5. L_ap損失: ||log(A_aug) - log(A)||_1 (論文 Equation after line 391)
-        # FIXME: BAP次元統一処理の複雑さ - 重要度：中
-        # 1. BAP -> Aperiodicity変換での複雑な次元統一処理が必要
-        # 2. 周波数ビン数不一致時の補間処理が煩雑
-        # 3. より効率的なBAP設計への変更検討余地
         freq_bins = target_spectrogram.shape[-1]
         bap_upsampled_original, _ = interpolate_bap_log_space(bap, freq_bins)
         bap_upsampled_aug, _ = interpolate_bap_log_space(bap_aug, freq_bins)
@@ -433,10 +419,6 @@ class Model(nn.Module):
         loss_ap = torch.mean(torch.abs(bap_upsampled_aug - bap_upsampled_original))
 
         # 全SLASH損失の重み付き合成（ノイズロバスト損失追加）
-        # FIXME: 損失重みバランス調整の必要性 - 重要度：中
-        # 1. ノイズロバスト損失3種追加により全体の損失バランスが変化
-        # 2. 論文重み設定をベースにしているが実装特有の調整が必要な可能性
-        # 3. 学習安定性・収束速度への影響要検証（特にw_aug, w_g_aug, w_ap）
         total_loss = (
             self.model_config.w_cons * loss_cons
             + self.model_config.w_guide * loss_guide
