@@ -41,8 +41,13 @@ class NetworkConfig(BaseModel):
     # Pitch Encoder 設定
     f0_bins: int
     bap_bins: int
-    hidden_size: int
-    encoder_layers: int
+
+    # NANSY++ Pitch Encoder 設定
+    nansy_conv_channels: int
+    nansy_num_resblocks: int
+    nansy_resblock_kernel_size: int
+    nansy_gru_hidden_size: int
+    nansy_gru_bidirectional: bool
 
     # CQT 設定
     cqt_bins: int

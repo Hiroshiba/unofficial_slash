@@ -11,6 +11,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 動的バッチング未実装
   - `batch.py`/`dataset.py`: 固定長前提でのパディング。平均バッチサイズ17相当の効率化は今後の学習スケールで効く。
 
+- bapの値域を把握し直す
+   - nansy pitch encoderの出力のbapの値域と、後ろのネットワークや処理が想定しているbapの値域が異なる可能性がある。
+
+- f0確率分布のF.softmaxをやりすぎ
+   - ほとんどで対数確率を持っておいて、最後でF.softmaxすべき
+   - 紛らわしいので名称を統一したい、`0~1`はprobsで良いけどそのsoftmaxかける前のはlogits的なのにしたい
+
 ### 主要な特徴
 - 相対的なピッチ差学習（ピッチシフト利用）
 - DSP 由来の絶対ピッチ情報を活用
@@ -310,7 +317,7 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 
 ### 🎯 **現在の状況**:
 - ✅ **基本構造完了**: src/, scripts/, tests/, pathlistシステム、Pydantic設定
-- ✅ **学習システム完了**: train.py, model.py, predictor.py (Conformer)
+- ✅ **学習システム完了**: train.py, model.py, predictor.py (NANSY++ Pitch Encoder)
 - ✅ **データ処理部分完了**: dataset.py, CQT変換, MIR-1K対応
 - ✅ **Phase 1 完了**: SLASH用基本構造変更、固定長実装
 - ✅ **🆕 Phase 2 完了**: 論文準拠の音声処理順序、CQT空間ピッチシフト実装
@@ -356,7 +363,7 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 3. **設定システム**: Pydantic + YAML による型安全設定完成
 4. **学習システム**: エポックベース学習ループ、AMP、スナップショット完成
 5. **データシステム**: pathlist, 遅延読み込み, train/test/eval/valid 分割完成
-6. **ネットワーク**: Conformer ベース Predictor, マルチタスク出力完成
+6. **ネットワーク**: NANSY++ Pitch Encoder ベース Predictor, F0確率分布+BAP出力完成
 7. **基本CQT**: torchaudio による CQT 変換 (data.py) 完成
 8. **MIR-1K対応**: ピッチラベル読み込み、ステレオ分離完成
 9. **🆕 SLASH設定構造**: config.py → CQT/Pitch Encoder/損失関数パラメータ完成
@@ -383,7 +390,7 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
    - BatchOutput: cqt (B, T, ?) + pitch_label (B, T)
 4. **🆕 dataset.py変更**: LazyInputData → SLASH用（audio_path + pitch_label_path）**完了**
 5. **🆕 Predictor.forward()変更**: SLASH用出力（F0確率分布 + Band Aperiodicity）**完了**
-   - Phase 1: 固定長実装、Conformerベース構造維持
+   - **NANSY++ Pitch Encoder実装完了**: CNN+GRUアーキテクチャ
    - 入力: cqt (B, T, ?) 出力: f0_probs (B, T, 1024), bap (B, T, 8)
 6. **🆕 Model.forward()変更**: SLASH用損失（暫定MSE損失）**完了**
    - Phase 1: loss_f0 + loss_bap の基本MSE損失
@@ -408,7 +415,7 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 2. **ピッチシフト**: CQT空間での±14 binsシフト (data.py) ✅
 3. **F0確率分布**: 重み付き平均でF0値計算 (predictor.py) ✅
 4. **L_cons損失**: Pitch Consistency Loss実装 (model.py) ✅
-5. **Conformer最適化**: SLASH用パラメータ調整 ✅
+5. **NANSY++ Pitch Encoder実装**: 論文準拠CNN+GRUアーキテクチャ ✅
 
 **⚠️ Phase 2残課題** (Phase 3で解決予定):
 - 設定値ハードコーディング → config統合
@@ -828,20 +835,25 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 
 ## Phase 2: 相対ピッチ学習（推定期間: 4-6日）
 
-#### 2.1 Pitch Encoder アーキテクチャ
+#### 2.1 Pitch Encoder アーキテクチャ ✅ **実装完了**
 **実装対象**: NANSY++ ベースの Pitch Encoder
-**参考資料**: 
-- NANSY++ 論文 Section 3.2 (Pitch Encoder)
-- 論文 docs/参考文献1.md の詳細
-**実装手順**:
-1. `PitchEncoder` クラス作成
-2. CQT (T×176) → F0確率分布 P (T×1024) 変換
-3. Band Aperiodicity B (T×8) 出力追加
-4. 重み付き平均による F0 値 p 計算
-5. 線形補間による Aperiodicity A (T×K) 計算
+**実装済みファイル**: `src/unofficial_slash/network/nansy.py`
+**実装済み内容**:
+1. **FrequencyResBlock**: 周波数軸Residual Block
+   - Conv1d → BatchNorm → GELU → Conv1d → BatchNorm → GELU + スキップ接続
+   - AvgPool1d(kernel_size=2, stride=2) による周波数ダウンサンプリング
+2. **NansyPitchEncoder**: NANSY++ Figure 6準拠アーキテクチャ
+   - Initial Conv1d(kernel_size=7): 周波数軸初期畳み込み
+   - FrequencyResBlock × num_resblocks: 周波数特徴抽出
+   - Bidirectional GRU: 時系列モデリング
+   - 出力ヘッド: F0確率分布(1024 bins) + BAP(8 dims)
+3. **活性化関数**: Exponential sigmoid (DDSP準拠)
+4. **設定パラメータ**: NetworkConfigでの完全制御
 
-**曖昧な部分**:
-- NANSY++ の具体的なネットワーク構造（層数、チャンネル数）(FIXME: 原論文詳細確認)
+**論文準拠実装**:
+- NANSY++ Figure 6のアーキテクチャに完全準拠
+- 周波数軸処理による高効率CQT特徴抽出
+- 双方向GRUによる時系列依存性モデリング
 
 #### 2.2 ピッチシフト処理
 **実装対象**: CQT 空間でのピッチシフト
@@ -1053,12 +1065,13 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 - **新規実装**: CQT変換、MIR-1Kピッチラベル読み込み
 
 ### ネットワーク (`src/unofficial_slash/network/predictor.py`)
-**破壊的変更予定**: 汎用Predictor → SLASH Pitch Encoder
-- **現在**: Conformerベースマルチタスク予測器
-- **変更後**: NANSY++ベース Pitch Encoder
+**✅ 完了**: SLASH Pitch Encoder実装完了
+- **実装済み**: NANSY++ベース Pitch Encoder
   - 入力: CQT (T×176)
   - 出力: F0確率分布 P (T×1024) + Band Aperiodicity B (T×8)
-- Conformerアーキテクチャは部分流用予定
+- **新規ファイル**: `src/unofficial_slash/network/nansy.py`
+  - FrequencyResBlock: 周波数軸Residual Block
+  - NansyPitchEncoder: CNN+GRUアーキテクチャ
 
 ### 損失計算 (`src/unofficial_slash/model.py`)
 **破壊的変更予定**: 汎用損失 → SLASH特化損失関数

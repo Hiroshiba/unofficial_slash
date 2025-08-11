@@ -24,8 +24,11 @@ network:
   # Pitch Encoder
   f0_bins: 1024
   bap_bins: 8
-  hidden_size: 16 # NOTE: SLASH論文では512
-  encoder_layers: 2 # NOTE: SLASH論文では6
+  nansy_conv_channels: 16 # NOTE: テスト用に縮小、論文で不明記、128くらい？
+  nansy_num_resblocks: 1 # NOTE: テスト用に縮小、論文では2
+  nansy_resblock_kernel_size: 3
+  nansy_gru_hidden_size: 32 # NOTE: テスト用に縮小、論文で不明記、256くらい？
+  nansy_gru_bidirectional: true # NOTE: 論文で不明記
 
   # CQT
   cqt_bins: 176
@@ -79,8 +82,8 @@ model:
   f0_max: 2000.0
 
   # BAP値域設定
-  bap_min: -6.907755  # -60dB相当
-  bap_max: 2.302585   # 20dB相当
+  bap_min: -6.907755 # -60dB相当
+  bap_max: 2.302585 # 20dB相当
 
   # ノイズロバスト化
   noise_snr_db_min: -6.0
