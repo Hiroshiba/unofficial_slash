@@ -11,12 +11,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - 動的バッチング未実装
   - `batch.py`/`dataset.py`: 固定長前提でのパディング。平均バッチサイズ17相当の効率化は今後の学習スケールで効く。
 
-- bapの値域を把握し直す
-   - nansy pitch encoderの出力のbapの値域と、後ろのネットワークや処理が想定しているbapの値域が異なる可能性がある。
-
 - f0確率分布のF.softmaxをやりすぎ
    - ほとんどで対数確率を持っておいて、最後でF.softmaxすべき
-   - 紛らわしいので名称を統一したい、`0~1`はprobsで良いけどそのsoftmaxかける前のはlogits的なのにしたい
+   - 紛らわしいので名称を全て統一したい、`0~1`はprobsで良いけどそのsoftmaxかける前のはlogits的なのにしたい
+
+- `forward_with_shift`の結果の`bap_shifted`を使っていない
+
+- BAP損失計算の不整合性がなんかおかしい気がする
+  - このlossをどう取るのが正解なのか調べて正すのが良さそう
 
 ### 主要な特徴
 - 相対的なピッチ差学習（ピッチシフト利用）

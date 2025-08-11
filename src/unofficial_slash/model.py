@@ -216,26 +216,24 @@ def apply_volume_augmentation(
     return augmented_audio
 
 
-def interpolate_bap_linear(bap: Tensor, freq_bins: int) -> Tensor:
-    """Band Aperiodicityを線形補間で周波数軸拡張"""
+def interpolate_bap_log_space(bap: Tensor, freq_bins: int) -> tuple[Tensor, Tensor]:
+    """対数振幅空間でのBand Aperiodicity線形補間"""
     batch_size, time_steps, bap_bins = bap.shape
-    bap_flat = bap.view(-1, 1, bap_bins)
 
-    bap_interpolated = F.interpolate(
-        bap_flat,
+    log_bap = torch.log(bap)
+    log_bap_flat = log_bap.view(-1, 1, bap_bins)
+
+    log_bap_interpolated = F.interpolate(
+        log_bap_flat,
         size=freq_bins,
         mode="linear",
         align_corners=True,
     )
 
-    return bap_interpolated.view(batch_size, time_steps, freq_bins)
+    bap_upsampled = log_bap_interpolated.view(batch_size, time_steps, freq_bins)
+    aperiodicity = torch.exp(bap_upsampled)
 
-
-def bap_to_aperiodicity(bap: Tensor, min_val: float, max_val: float) -> Tensor:
-    """BAP(log scale) -> linear aperiodicity with offset scaling"""
-    clamped_bap = torch.clamp(bap, min=min_val, max=max_val)
-    linear_amplitude = torch.exp(clamped_bap - max_val)
-    return linear_amplitude
+    return bap_upsampled, aperiodicity
 
 
 class Model(nn.Module):
@@ -327,14 +325,8 @@ class Model(nn.Module):
             )
         )
 
-        # BAP線形補間（Pseudo Spectrogram生成前に計算）
-        bap_upsampled = interpolate_bap_linear(bap, freq_bins)
-
-        # BAP(対数領域) -> aperiodicity(線形振幅) に変換
-        # 疑似スペクトログラム生成・V/UV判定の双方で線形領域を使用する
-        aperiodicity = bap_to_aperiodicity(
-            bap_upsampled, self.model_config.bap_min, self.model_config.bap_max
-        )
+        # 対数振幅空間でのBAP線形補間
+        bap_upsampled, aperiodicity = interpolate_bap_log_space(bap, freq_bins)
 
         # 論文準拠Pseudo Spectrogram生成: S* = (E*_p ⊙ H ⊙ (1 − A)) + (F(eap) ⊙ H ⊙ A)
         pseudo_spectrogram = self.predictor.pseudo_spec_generator(
@@ -351,27 +343,30 @@ class Model(nn.Module):
 
         # 時間軸統一処理（CQTとSTFTの1フレーム差は技術的制約として正常）
         t_f0 = f0_values.shape[1]
-        t_bap = bap_upsampled.shape[1]
-        frame_diff = abs(t_f0 - t_bap)
+        t_aperiodicity = aperiodicity.shape[1]
+        frame_diff = abs(t_f0 - t_aperiodicity)
 
         if frame_diff > 1:
             raise ValueError(
-                f"Frame count mismatch too large: f0_values={t_f0}, bap={t_bap} "
+                f"Frame count mismatch too large: f0_values={t_f0}, aperiodicity={t_aperiodicity} "
                 f"(diff={frame_diff}). "
                 f"1フレーム差は正常（nnAudio CQTとtorch.stftの実装方式差）、2フレーム以上は異常。"
             )
 
-        min_frames = min(t_f0, t_bap)
-        bap_upsampled_aligned = bap_upsampled[:, :min_frames, :]
+        min_frames = min(t_f0, t_aperiodicity)
 
         # V/UV DetectorのマスクをBAP損失用に時間軸統一
         # vuv_maskは確率値なので、boolean化する
         voiced_mask_target = vuv_mask[:, :min_frames] > 0.5
 
+        # 対数空間での適切なBAP損失: 有声=log(eps), 無声=log(1)=0
+        bap_upsampled_aligned = bap_upsampled[:, :min_frames, :]
+        eps = 1e-7
+        log_eps = torch.log(torch.tensor(eps, device=bap_upsampled_aligned.device))
         bap_target = torch.where(
             voiced_mask_target.unsqueeze(-1),
+            torch.full_like(bap_upsampled_aligned, log_eps.item()),
             torch.zeros_like(bap_upsampled_aligned),
-            torch.ones_like(bap_upsampled_aligned),
         )
         loss_bap = huber_loss(bap_upsampled_aligned, bap_target)
 
@@ -449,8 +444,8 @@ class Model(nn.Module):
         # 2. 周波数ビン数不一致時の補間処理が煩雑
         # 3. より効率的なBAP設計への変更検討余地
         freq_bins = target_spectrogram.shape[-1]
-        bap_upsampled_original = interpolate_bap_linear(bap, freq_bins)
-        bap_upsampled_aug = interpolate_bap_linear(bap_aug, freq_bins)
+        bap_upsampled_original, _ = interpolate_bap_log_space(bap, freq_bins)
+        bap_upsampled_aug, _ = interpolate_bap_log_space(bap_aug, freq_bins)
 
         # L_ap損失: 対数振幅領域で直接計算（効率性最適化）
         # log(exp(BAP1)) - log(exp(BAP2)) = BAP1 - BAP2
