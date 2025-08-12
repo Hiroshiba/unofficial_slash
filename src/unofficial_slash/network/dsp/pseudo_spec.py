@@ -5,9 +5,6 @@ import torch.nn.functional as F
 from torch import Tensor, nn
 
 from .audio_processing import frames_to_continuous_stft
-from .ddsp_synthesizer import (
-    generate_aperiodic_excitation,
-)
 
 
 def triangle_wave_oscillator(
@@ -42,6 +39,49 @@ def triangle_wave_oscillator(
     triangle_wave = 4 * torch.abs(phase_normalized - 0.5) - 1  # (B, T, K)
 
     return triangle_wave
+
+
+def generate_aperiodic_excitation(
+    aperiodicity: Tensor,  # (B, T, K) または (B, T)
+    frame_length: int = 480,
+    random_seed: int | None = None,
+) -> Tensor:
+    """
+    非周期励起信号eap生成 - ガウシアンノイズベース
+
+    Args:
+        aperiodicity: 非周期性パラメータ (B, T, K) または (B, T)
+        frame_length: フレーム長（samples）
+        random_seed: 再現性のためのランダムシード
+
+    Returns
+    -------
+        非周期励起信号eap (B, T, frame_length)
+    """
+    if aperiodicity.dim() == 3:
+        batch_size, time_frames, freq_bins = aperiodicity.shape
+        # 周波数軸でのaperiodicity値の平均を取る
+        aperiodicity_avg = torch.mean(aperiodicity, dim=-1)  # (B, T)
+    else:
+        batch_size, time_frames = aperiodicity.shape
+        aperiodicity_avg = aperiodicity  # (B, T)
+
+    device = aperiodicity.device
+
+    # 再現性のためのシード設定
+    if random_seed is not None:
+        torch.manual_seed(random_seed)
+
+    # ガウシアンノイズ生成
+    noise = torch.randn(
+        batch_size, time_frames, frame_length, device=device
+    )  # (B, T, frame_length)
+
+    # aperiodicityに基づいて振幅調整
+    aperiodicity_expanded = aperiodicity_avg.unsqueeze(-1)  # (B, T, 1)
+    aperiodic_excitation = noise * aperiodicity_expanded  # (B, T, frame_length)
+
+    return aperiodic_excitation
 
 
 def pseudo_periodic_excitation(

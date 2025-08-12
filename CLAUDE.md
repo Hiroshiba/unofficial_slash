@@ -37,7 +37,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    - Pitch Guide Generator: SHS による事前分布計算
    - Spec Env. Estimator: スペクトル包絡推定
    - Pseudo Spec. Generator: 微分可能スペクトログラム生成
-   - DDSP Synthesizer: 音声再合成
+   - Differentiable WORLD Synthesizer: 音声再合成
    - V/UV Detector: 有声/無声判定
 
 ## 損失関数設計
@@ -90,7 +90,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 1. **CQT 設定**: frame_shift=5ms, f_min=32.70Hz, 205bins, 24bins/octave, filter_scale=0.5
 2. **Pitch Guide**: fine structure spectrum → SHS → 正規化
 3. **Pseudo Spectrogram**: 三角波振動子 → 周期性励起スペクトログラム
-4. **DDSP 合成**: 各成分を最小位相化→個別にSTFT→周波数領域で H/A を適用して合成（式(7)準拠）。
+4. **Differentiable WORLD 合成**: 時間領域での周期・非周期成分合成→最小位相応答処理→音声再構成（SLASH論文Footnote 3準拠）。
 
 ### 学習設定
 - Optimizer: AdamW (lr=0.0002)
@@ -463,6 +463,15 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 **Phase 12 進捗**: ✅ - 生成システムSLASH対応・test_e2e_generate修正完成
 **Phase 13 進捗**: ✅ - Ground Truth F0ラベル依存性完全除去・論文準拠自己教師あり学習実現完成
 **Phase 14 進捗**: ✅ - BAP対数スケーリング再設計・学習性能劇的改善実現完成
+**Phase 15 進捗**: ✅ - Differentiable WORLD Synthesizer移行・論文準拠音声合成システム実現完成
+
+**🎉 Phase 15 最終成果**:
+- ✅ **Differentiable WORLD Synthesizer移行完了**: DDSPSynthesizerからの完全移行・SLASH論文Footnote 3準拠実装
+- ✅ **GED損失時間軸統一処理追加**: DifferentiableWorldとSTFTのフレーム数不一致対応・1フレーム差許容ロジック実装
+- ✅ **論文準拠音声合成実現**: 時間領域での周期・非周期成分合成→最小位相応答処理→STFT変換の完全なパイプライン
+- ✅ **generate_two_spectrograms実装**: GED損失用の2つの異なるスペクトログラム生成機能（ガウシアンノイズによる差異）
+- ✅ **tensor形状コメント修正**: K→?への統一でより正確な次元表記を実現
+- ⚠️ **設定値不整合問題発見**: base_config.yamlのddsp_n_harmonics残存・DifferentiableWorldでは使用されない
 
 **🎉 Phase 14 最終成果**:
 - ✅ **BAP対数スケーリング完全再設計**: dB→対数値変換による論文準拠実装
@@ -547,6 +556,7 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
 - データフロー・テンソル形状の整合性確認済み
 - SHS実装の効率化・ベクトル化完了（GPU最適化、メモリ効率改善）
 - 実学習実行に向けた技術課題解決済み
+- **🆕 Phase 15**: Differentiable WORLD Synthesizer移行完了・SLASH論文Footnote 3準拠の音声合成実現
 
 ## 🚨 **現状の技術課題・未解決問題**
 
@@ -586,7 +596,10 @@ python evaluate.py --model_path checkpoints/best.pth --test_data mir-1k --data_r
   - 評価時もshift=0の学習と同等処理をすべき可能性
 - ⚠️ **メモリ・計算効率**: 大規模バッチでの最適化が不完全
   - fine_structure_spectrum計算の最適化余地
-  - DDSP Synthesizerでのフレーム重複処理効率化
+  - Differentiable WORLD Synthesizerでのフレーム重複処理効率化
+- 🆕 **設定値不整合問題** (Phase 15で発見): base_config.yamlの未使用パラメータ残存
+  - `ddsp_n_harmonics: 16`がDifferentiable WORLD移行後に使用されない
+  - 設定ファイルと実装の整合性確保が必要
 - ⚠️ **生成システムの実用性改善**: Phase 12で基本機能は完成、実用性向上が必要
   - ファイル名問題: batch_xxxx.npzでは元データとの対応関係が不明
   - バッチ処理問題: バッチサイズ>1時に複数サンプルが1ファイルに混在

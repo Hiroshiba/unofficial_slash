@@ -8,7 +8,7 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 
 from unofficial_slash.config import NetworkConfig
-from unofficial_slash.network.dsp.ddsp_synthesizer import DDSPSynthesizer
+from unofficial_slash.network.dsp.differentiable_world import DifferentiableWorld
 from unofficial_slash.network.dsp.pitch_guide import PitchGuideGenerator
 from unofficial_slash.network.dsp.pseudo_spec import PseudoSpectrogramGenerator
 from unofficial_slash.network.dsp.vuv_detector import VUVDetector
@@ -131,12 +131,11 @@ class Predictor(nn.Module):
             hop_length=network_config.pseudo_spec_hop_length,
         )
 
-        # DDSP Synthesizer初期化
-        self.ddsp_synthesizer = DDSPSynthesizer(
+        # Differentiable World Synthesizer初期化
+        self.world_synthesizer = DifferentiableWorld(
             sample_rate=sample_rate,
             n_fft=network_config.pseudo_spec_n_fft,
             hop_length=network_config.pseudo_spec_hop_length,
-            n_harmonics=network_config.ddsp_n_harmonics,
         )
 
         # V/UV Detector初期化

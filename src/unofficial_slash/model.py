@@ -31,7 +31,7 @@ class ModelOutput(DataNumProtocol):
     loss_pseudo: Tensor  # Pseudo Spectrogram Loss (L_pseudo)
     loss_recon: Tensor  # Reconstruction Loss (L_recon, GED)
 
-    # ノイズロバスト損失項目 (SLASH論文 Section 2.6)
+    # ノイズロバスト損失項目
     loss_aug: Tensor  # L_aug: 拡張データでの基本損失
     loss_g_aug: Tensor  # L_g-aug: 拡張データでのPitch Guide損失
     loss_ap: Tensor  # L_ap: Aperiodicity一貫性損失
@@ -132,17 +132,37 @@ def pseudo_spectrogram_loss(
 
 
 def reconstruction_loss(
-    generated_spec_1: Tensor,  # (B, T, K) 生成スペクトログラム S˜1
-    generated_spec_2: Tensor,  # (B, T, K) 生成スペクトログラム S˜2
-    target_spectrogram: Tensor,  # (B, T, K) ターゲットスペクトログラム S
+    generated_spec_1: Tensor,  # (B, T, ?) 生成スペクトログラム S˜1
+    generated_spec_2: Tensor,  # (B, T, ?) 生成スペクトログラム S˜2
+    target_spectrogram: Tensor,  # (B, T, ?) ターゲットスペクトログラム S
     ged_alpha: float,  # GEDの反発項重み α
     window_size: int,  # Fine structure spectrum用の窓サイズ
 ) -> Tensor:
     """Reconstruction Loss (L_recon) - SLASH論文 Equation (8) GED"""
+    # 時間軸統一処理（DifferentiableWorldとSTFTのフレーム数不一致対応）
+    t_gen_1 = generated_spec_1.shape[1]
+    t_gen_2 = generated_spec_2.shape[1]
+    t_target = target_spectrogram.shape[1]
+    
+    # フレーム数の最大差チェック（1フレーム差は正常、2フレーム以上は異常）
+    max_diff = max(abs(t_gen_1 - t_target), abs(t_gen_2 - t_target), abs(t_gen_1 - t_gen_2))
+    if max_diff > 1:
+        raise ValueError(
+            f"Frame count mismatch too large in GED loss: "
+            f"gen1={t_gen_1}, gen2={t_gen_2}, target={t_target} "
+            f"(max_diff={max_diff}). 1フレーム差は正常、2フレーム以上は異常。"
+        )
+    
+    # 最小フレーム数に統一
+    min_frames = min(t_gen_1, t_gen_2, t_target)
+    generated_spec_1 = generated_spec_1[:, :min_frames, :]
+    generated_spec_2 = generated_spec_2[:, :min_frames, :]
+    target_spectrogram = target_spectrogram[:, :min_frames, :]
+    
     # Fine structure spectrum計算: ψ(S˜1), ψ(S˜2), ψ(S)
-    psi_gen_1 = fine_structure_spectrum(generated_spec_1, window_size)  # (B, T, K)
-    psi_gen_2 = fine_structure_spectrum(generated_spec_2, window_size)  # (B, T, K)
-    psi_target = fine_structure_spectrum(target_spectrogram, window_size)  # (B, T, K)
+    psi_gen_1 = fine_structure_spectrum(generated_spec_1, window_size)  # (B, T, ?)
+    psi_gen_2 = fine_structure_spectrum(generated_spec_2, window_size)  # (B, T, ?)
+    psi_target = fine_structure_spectrum(target_spectrogram, window_size)  # (B, T, ?)
 
     # 第1項: ||ψ(S˜1) - ψ(S)||₁
     attraction_term = torch.mean(torch.abs(psi_gen_1 - psi_target))
@@ -360,11 +380,11 @@ class Model(nn.Module):
         )
 
         # L_recon損失 (GED)
-        # DDSP Synthesizerで2つの異なるスペクトログラムを生成
+        # Differentiable World Synthesizerで2つの異なるスペクトログラムを生成
         generated_spec_1, generated_spec_2 = (
-            self.predictor.ddsp_synthesizer.generate_two_spectrograms(
-                f0_values=f0_values,
-                spectral_envelope=spectral_envelope,
+            self.predictor.world_synthesizer.generate_two_spectrograms(
+                f0_hz=f0_values,
+                spectral_env=spectral_envelope,
                 aperiodicity=aperiodicity,
             )
         )

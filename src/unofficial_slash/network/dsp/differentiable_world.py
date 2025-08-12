@@ -238,3 +238,47 @@ class DifferentiableWorld(nn.Module):
         complex_spectrum = torch.complex(complex_spectrum_re, complex_spectrum_im)
 
         return complex_spectrum  # (B, ?, T)
+
+    def generate_two_spectrograms(
+        self,
+        f0_hz,  # (B, T)
+        spectral_env,  # (B, T, ?)
+        aperiodicity,  # (B, T, ?)
+    ):
+        """GED損失用に2つの異なるスペクトログラムを生成"""
+        # DifferentiableWorld用に形状を変換 (B, T, ?) -> (B, ?, T)
+        spectral_env_transposed = spectral_env.transpose(-1, -2)  # (B, ?, T)
+        aperiodicity_transposed = aperiodicity.transpose(-1, -2)  # (B, ?, T)
+
+        # 同じ入力で2回音声合成
+        audio1 = self.forward(
+            f0_hz, spectral_env_transposed, aperiodicity_transposed
+        )  # (B, L)
+        audio2 = self.forward(
+            f0_hz, spectral_env_transposed, aperiodicity_transposed
+        )  # (B, L)
+
+        # Hann窓を作成
+        device = audio1.device
+        window = torch.hann_window(self.n_fft, device=device)
+
+        # STFTでスペクトログラム化
+        spec1 = torch.stft(
+            audio1,
+            n_fft=self.n_fft,
+            hop_length=self.hop_length,
+            window=window,
+            return_complex=True,
+        )
+        spec2 = torch.stft(
+            audio2,
+            n_fft=self.n_fft,
+            hop_length=self.hop_length,
+            window=window,
+            return_complex=True,
+        )
+
+        spec1 = torch.abs(spec1).transpose(-1, -2)  # (B, T, ?)
+        spec2 = torch.abs(spec2).transpose(-1, -2)  # (B, T, ?)
+
+        return spec1, spec2
