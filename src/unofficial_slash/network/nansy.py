@@ -118,6 +118,6 @@ class NansyPitchEncoder(nn.Module):
 
         bap = (
             1.0 * torch.sigmoid(bap) ** math.log(10.0) + 1e-7
-        )  # NOTE: NANSY++論文では係数`2.0`をかけるが、bapは値域が`[0, 1]`であるため1.0をかける
+        )  # NOTE: NANSY++論文では係数`2.0`をかけるが、bapは値域が`[0, 1]`であるため`1.0`をかける
 
         return f0_logits, bap

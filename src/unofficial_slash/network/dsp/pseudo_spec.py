@@ -29,11 +29,11 @@ def triangle_wave_oscillator(
     # 三角波生成 - SLASH論文準拠の条件分岐実装
     # 論文: X_{t,k} = -1 if Φ_{t,k} < 0.5, else 4|Φ_{t,k} - ⌊Φ_{t,k}⌋ - 0.5| - 1
 
-    # Φを0-1の範囲に正規化（フロア関数用）
-    phase_normalized = phase - torch.floor(phase)  # (B, T, K), 小数部 {Φ}
+    # 条件分岐: Φ < 0.5 の場合は -1
+    condition = phase < 0.5  # (B, T, K)
 
-    # 条件分岐: {Φ} < 0.5 の場合は -1、それ以外は標準三角波式
-    condition = phase_normalized < 0.5  # (B, T, K)
+    # 標準三角波部分は正規化位相を使用: 4|{Φ} - 0.5| - 1
+    phase_normalized = phase - torch.floor(phase)  # (B, T, K), 小数部 {Φ}
 
     # 標準三角波部分: 4|{Φ} - 0.5| - 1
     triangle_standard = 4 * torch.abs(phase_normalized - 0.5) - 1  # (B, T, K)
@@ -46,7 +46,7 @@ def triangle_wave_oscillator(
 
 def pseudo_periodic_excitation(
     triangle_wave: Tensor,  # (B, T, K) 三角波振動子出力
-    epsilon: float = 0.001,
+    epsilon: float,
 ) -> Tensor:
     """Pseudo Periodic Excitation の計算 - SLASH論文 Equation (4)"""
     # max(X, ε)を計算
@@ -90,7 +90,7 @@ class PseudoSpectrogramGenerator(nn.Module):
     ) -> Tensor:  # (B, T, K)
         """Pseudo Spectrogram生成"""
         triangle_wave = triangle_wave_oscillator(
-            f0_values, self.sample_rate, self.n_freq_bins, self.epsilon
+            f0_values, self.sample_rate, self.n_freq_bins
         )
         pseudo_excitation = pseudo_periodic_excitation(triangle_wave, self.epsilon)
 
