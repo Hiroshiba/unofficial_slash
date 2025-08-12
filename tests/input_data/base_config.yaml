@@ -38,8 +38,8 @@ network:
   cqt_filter_scale: 0.5
 
   # Pitch Guide Generator
-  pitch_guide_window_size: 50
-  pitch_guide_shs_n_max: 10
+  pitch_guide_window_size: 50 # NOTE: 論文で不明記
+  pitch_guide_shs_n_max: 10 # NOTE: 論文で不明記
   pitch_guide_f_min: 20.0
   pitch_guide_f_max: 2000.0
   pitch_guide_n_fft: 1024

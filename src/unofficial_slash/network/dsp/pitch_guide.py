@@ -181,34 +181,48 @@ class PitchGuideGenerator(nn.Module):
         pitch_guide: Tensor,  # (B, T, F)
         shift_semitones: Tensor,  # (B,)
     ) -> Tensor:  # (B, T, F)
-        """周波数軸でPitch Guideをシフト"""
+        """
+        周波数軸でPitch Guideをシフト（連続量補間版）
+
+        SLASH論文のGt,f−Δfに準拠し、連続的な周波数シフトを一次線形補間で実現
+        """
         if torch.all(shift_semitones == 0):
             return pitch_guide
 
         batch_size, time_frames, freq_bins = pitch_guide.shape
+        device = pitch_guide.device
 
-        # セミトーンを周波数ビンに変換
         log_freq_range = math.log(self.f_max / self.f_min)
         bins_per_semitone = freq_bins / (log_freq_range / math.log(2) * 12)
-        shift_bins = torch.round(shift_semitones * bins_per_semitone).to(torch.int)
+        delta_bins = shift_semitones * bins_per_semitone
+        base_indices = torch.arange(freq_bins, device=device, dtype=torch.float32)
 
-        # バッチごとに異なるシフトを適用
-        shifted_guides = []
+        result = torch.zeros_like(pitch_guide)
+
         for batch_idx in range(batch_size):
-            guide = pitch_guide[batch_idx]  # (T, F)
-            shift = shift_bins[batch_idx].item()
+            delta = delta_bins[batch_idx]
 
-            if shift == 0:
-                shifted_guides.append(guide)
+            if abs(delta) < 1e-6:
+                result[batch_idx] = pitch_guide[batch_idx]
                 continue
 
-            shifted_guide = torch.zeros_like(guide)
+            shifted_indices = base_indices - delta
+            x0 = torch.floor(shifted_indices).clamp(0, freq_bins - 1).long()
+            x1 = (x0 + 1).clamp(max=freq_bins - 1)
+            weight = shifted_indices - x0.float()
+            valid_mask = (shifted_indices >= 0) & (shifted_indices < freq_bins)
 
-            if shift > 0 and shift < freq_bins:
-                shifted_guide[:, :-shift] = guide[:, shift:]
-            elif shift < 0 and abs(shift) < freq_bins:
-                shifted_guide[:, abs(shift) :] = guide[:, :shift]
+            guide = pitch_guide[batch_idx]
+            g0 = torch.gather(
+                guide, dim=-1, index=x0.unsqueeze(0).expand(time_frames, -1)
+            )
+            g1 = torch.gather(
+                guide, dim=-1, index=x1.unsqueeze(0).expand(time_frames, -1)
+            )
 
-            shifted_guides.append(shifted_guide)
+            weight_exp = weight.unsqueeze(0).expand(time_frames, -1)
+            interpolated = g0 * (1 - weight_exp) + g1 * weight_exp
+            mask_exp = valid_mask.unsqueeze(0).expand(time_frames, -1)
+            result[batch_idx] = interpolated * mask_exp
 
-        return torch.stack(shifted_guides, dim=0)
+        return result
