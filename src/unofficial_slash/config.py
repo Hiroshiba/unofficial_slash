@@ -69,9 +69,6 @@ class NetworkConfig(BaseModel):
     pseudo_spec_n_fft: int
     pseudo_spec_hop_length: int
 
-    # DDSP Synthesizer 設定
-    ddsp_n_harmonics: int
-
     # V/UV Detector 設定
     vuv_detector_eps: float
     vuv_threshold: float

@@ -1,19 +1,15 @@
 """SLASH論文における微分可能スペクトログラム生成"""
 
 import torch
-import torch.nn.functional as F
 from torch import Tensor, nn
-
-from .audio_processing import frames_to_continuous_stft
 
 
 def triangle_wave_oscillator(
     f0_values: Tensor,  # (B, T) F0値
     sample_rate: int,
     n_freq_bins: int,
-    epsilon: float = 0.001,
 ) -> Tensor:
-    """三角波振動子の実装 - SLASH論文 Equation (4) 関連"""
+    """三角波振動子の実装 - SLASH論文 Equation (4) 前の定義準拠"""
     device = f0_values.device
 
     # 周波数ビンインデックス k = 1, 2, ..., K
@@ -30,58 +26,22 @@ def triangle_wave_oscillator(
         * k_indices.unsqueeze(0).unsqueeze(0)
     )  # (B, T, K)
 
-    # 三角波生成
-    # Φを0-1の範囲に正規化（フロア関数用）
-    phase_normalized = phase - torch.floor(phase)  # (B, T, K)
+    # 三角波生成 - SLASH論文準拠の条件分岐実装
+    # 論文: X_{t,k} = -1 if Φ_{t,k} < 0.5, else 4|Φ_{t,k} - ⌊Φ_{t,k}⌋ - 0.5| - 1
 
-    # 論文式の小数部定義に従う三角波
-    # X = 4 |{Φ} - 0.5| - 1, where {Φ} = Φ - floor(Φ)
-    triangle_wave = 4 * torch.abs(phase_normalized - 0.5) - 1  # (B, T, K)
+    # Φを0-1の範囲に正規化（フロア関数用）
+    phase_normalized = phase - torch.floor(phase)  # (B, T, K), 小数部 {Φ}
+
+    # 条件分岐: {Φ} < 0.5 の場合は -1、それ以外は標準三角波式
+    condition = phase_normalized < 0.5  # (B, T, K)
+
+    # 標準三角波部分: 4|{Φ} - 0.5| - 1
+    triangle_standard = 4 * torch.abs(phase_normalized - 0.5) - 1  # (B, T, K)
+
+    # 論文準拠の条件分岐適用
+    triangle_wave = torch.where(condition, -1.0, triangle_standard)  # (B, T, K)
 
     return triangle_wave
-
-
-def generate_aperiodic_excitation(
-    aperiodicity: Tensor,  # (B, T, K) または (B, T)
-    frame_length: int = 480,
-    random_seed: int | None = None,
-) -> Tensor:
-    """
-    非周期励起信号eap生成 - ガウシアンノイズベース
-
-    Args:
-        aperiodicity: 非周期性パラメータ (B, T, K) または (B, T)
-        frame_length: フレーム長（samples）
-        random_seed: 再現性のためのランダムシード
-
-    Returns
-    -------
-        非周期励起信号eap (B, T, frame_length)
-    """
-    if aperiodicity.dim() == 3:
-        batch_size, time_frames, freq_bins = aperiodicity.shape
-        # 周波数軸でのaperiodicity値の平均を取る
-        aperiodicity_avg = torch.mean(aperiodicity, dim=-1)  # (B, T)
-    else:
-        batch_size, time_frames = aperiodicity.shape
-        aperiodicity_avg = aperiodicity  # (B, T)
-
-    device = aperiodicity.device
-
-    # 再現性のためのシード設定
-    if random_seed is not None:
-        torch.manual_seed(random_seed)
-
-    # ガウシアンノイズ生成
-    noise = torch.randn(
-        batch_size, time_frames, frame_length, device=device
-    )  # (B, T, frame_length)
-
-    # aperiodicityに基づいて振幅調整
-    aperiodicity_expanded = aperiodicity_avg.unsqueeze(-1)  # (B, T, 1)
-    aperiodic_excitation = noise * aperiodicity_expanded  # (B, T, frame_length)
-
-    return aperiodic_excitation
 
 
 def pseudo_periodic_excitation(
@@ -126,8 +86,9 @@ class PseudoSpectrogramGenerator(nn.Module):
         f0_values: Tensor,  # (B, T)
         spectral_envelope: Tensor,  # (B, T, K)
         aperiodicity: Tensor,  # (B, T, K)
+        eap_spectrogram: Tensor,  # (B, T, K)
     ) -> Tensor:  # (B, T, K)
-        """SLASH論文式(5)準拠のPseudo Spectrogram生成"""
+        """Pseudo Spectrogram生成"""
         triangle_wave = triangle_wave_oscillator(
             f0_values, self.sample_rate, self.n_freq_bins, self.epsilon
         )
@@ -135,23 +96,34 @@ class PseudoSpectrogramGenerator(nn.Module):
 
         periodic_component = pseudo_excitation * spectral_envelope * (1 - aperiodicity)
 
-        aperiodic_excitation = generate_aperiodic_excitation(
-            aperiodicity=aperiodicity,
-            frame_length=self.frame_length,
-        )
-
-        aperiodic_freq = frames_to_continuous_stft(
-            frame_signals=aperiodic_excitation,
-            n_fft=self.n_fft,
-            hop_length=self.hop_length,
-        )
-        if aperiodic_freq.shape[-1] != spectral_envelope.shape[-1]:
+        # Synthesizerの非周期成分から得たF(eap)を使用
+        # SLASH論文式(5): S* = (E*_p ⊙ H ⊙ (1-A)) + (F(eap) ⊙ H ⊙ A)
+        if eap_spectrogram.shape[-1] != spectral_envelope.shape[-1]:
             raise ValueError(
-                f"Frequency bins mismatch: aperiodic_freq={aperiodic_freq.shape[-1]} != H/A={spectral_envelope.shape[-1]}. "
-                f"Check n_fft/hop and generator settings."
+                f"Frequency bins mismatch: eap_spectrogram={eap_spectrogram.shape[-1]} != H/A={spectral_envelope.shape[-1]}. "
+                f"Check STFT parameters between Synthesizer and PseudoSpec."
             )
 
-        aperiodic_component = aperiodic_freq * spectral_envelope * aperiodicity
+        # 時間軸統一処理（CQTとSTFTの1フレーム差は技術的制約として正常）
+        t_eap = eap_spectrogram.shape[1]
+        t_envelope = spectral_envelope.shape[1]
+        frame_diff = abs(t_eap - t_envelope)
+
+        if frame_diff > 1:
+            raise ValueError(
+                f"Frame count mismatch too large in PseudoSpec: "
+                f"eap_spectrogram={t_eap}, spectral_envelope={t_envelope} "
+                f"(diff={frame_diff}). 1フレーム差は正常、2フレーム以上は異常。"
+            )
+
+        # 最小フレーム数に統一
+        min_frames = min(t_eap, t_envelope, aperiodicity.shape[1])
+        eap_spectrogram = eap_spectrogram[:, :min_frames, :]
+        spectral_envelope = spectral_envelope[:, :min_frames, :]
+        aperiodicity = aperiodicity[:, :min_frames, :]
+        periodic_component = periodic_component[:, :min_frames, :]
+
+        aperiodic_component = eap_spectrogram * spectral_envelope * aperiodicity
 
         return periodic_component + aperiodic_component
 

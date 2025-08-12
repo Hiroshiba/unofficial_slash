@@ -192,7 +192,41 @@ class DifferentiableWorld(nn.Module):
             waveform_syn_p = waveform_syn_p - means_p[:, : waveform_syn_p.size(1)]
             waveform_syn_a = waveform_syn_a - means_a[:, : waveform_syn_a.size(1)]
 
-        return waveform_syn_p + waveform_syn_a  # (B, L)
+        return waveform_syn_p + waveform_syn_a, waveform_syn_a  # (B, L), (B, L)
+
+    def extract_aperiodic_excitation(
+        self,
+        f0_hz,  # (B, T)
+        spectral_env,  # (B, T, ?)
+        aperiodicity,  # (B, T, ?)
+        n_fft: int,
+        hop_length: int,
+    ):
+        """Synthesizerの非周期成分からeapを抽出"""
+        spectral_env_transposed = spectral_env.transpose(-1, -2)
+        aperiodicity_transposed = aperiodicity.transpose(-1, -2)
+
+        _, waveform_aperiodic = self.forward(
+            f0_hz,
+            spectral_env_transposed,
+            aperiodicity_transposed,
+        )
+
+        device = f0_hz.device
+        window = torch.hann_window(n_fft, device=device)
+
+        stft_result = torch.stft(
+            waveform_aperiodic,
+            n_fft=n_fft,
+            hop_length=hop_length,
+            window=window,
+            center=True,
+            return_complex=True,
+        )
+
+        eap_spectrogram = torch.abs(stft_result).transpose(-1, -2)  # (B, T, K)
+
+        return eap_spectrogram
 
     def _get_minimum_phase(
         self,
@@ -251,10 +285,10 @@ class DifferentiableWorld(nn.Module):
         aperiodicity_transposed = aperiodicity.transpose(-1, -2)  # (B, ?, T)
 
         # 同じ入力で2回音声合成
-        audio1 = self.forward(
+        audio1, _ = self.forward(
             f0_hz, spectral_env_transposed, aperiodicity_transposed
         )  # (B, L)
-        audio2 = self.forward(
+        audio2, _ = self.forward(
             f0_hz, spectral_env_transposed, aperiodicity_transposed
         )  # (B, L)
 

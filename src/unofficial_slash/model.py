@@ -143,22 +143,24 @@ def reconstruction_loss(
     t_gen_1 = generated_spec_1.shape[1]
     t_gen_2 = generated_spec_2.shape[1]
     t_target = target_spectrogram.shape[1]
-    
+
     # フレーム数の最大差チェック（1フレーム差は正常、2フレーム以上は異常）
-    max_diff = max(abs(t_gen_1 - t_target), abs(t_gen_2 - t_target), abs(t_gen_1 - t_gen_2))
+    max_diff = max(
+        abs(t_gen_1 - t_target), abs(t_gen_2 - t_target), abs(t_gen_1 - t_gen_2)
+    )
     if max_diff > 1:
         raise ValueError(
             f"Frame count mismatch too large in GED loss: "
             f"gen1={t_gen_1}, gen2={t_gen_2}, target={t_target} "
             f"(max_diff={max_diff}). 1フレーム差は正常、2フレーム以上は異常。"
         )
-    
+
     # 最小フレーム数に統一
     min_frames = min(t_gen_1, t_gen_2, t_target)
     generated_spec_1 = generated_spec_1[:, :min_frames, :]
     generated_spec_2 = generated_spec_2[:, :min_frames, :]
     target_spectrogram = target_spectrogram[:, :min_frames, :]
-    
+
     # Fine structure spectrum計算: ψ(S˜1), ψ(S˜2), ψ(S)
     psi_gen_1 = fine_structure_spectrum(generated_spec_1, window_size)  # (B, T, ?)
     psi_gen_2 = fine_structure_spectrum(generated_spec_2, window_size)  # (B, T, ?)
@@ -346,11 +348,21 @@ class Model(nn.Module):
         # 対数振幅空間でのBAP線形補間
         _, aperiodicity = interpolate_bap_log_space(bap, freq_bins)
 
-        # 論文準拠Pseudo Spectrogram生成: S* = (E*_p ⊙ H ⊙ (1 − A)) + (F(eap) ⊙ H ⊙ A)
+        # Synthesizerの非周期成分からeapスペクトログラムを抽出
+        eap_spectrogram = self.predictor.world_synthesizer.extract_aperiodic_excitation(
+            f0_hz=f0_values,
+            spectral_env=spectral_envelope,
+            aperiodicity=aperiodicity,
+            n_fft=n_fft,
+            hop_length=hop_length,
+        )
+
+        # 論文準拠のPseudo Spectrogram生成（F0のみに勾配流す）
         pseudo_spectrogram = self.predictor.pseudo_spec_generator(
             f0_values=f0_values,
-            spectral_envelope=spectral_envelope,
-            aperiodicity=aperiodicity,
+            spectral_envelope=spectral_envelope.detach(),
+            aperiodicity=aperiodicity.detach(),
+            eap_spectrogram=eap_spectrogram.detach(),
         )
 
         # V/UV Detector使用でV/UVマスク生成（L_pseudo用）
