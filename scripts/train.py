@@ -22,6 +22,7 @@ from unofficial_slash.evaluator import (
 from unofficial_slash.generator import Generator
 from unofficial_slash.model import Model, ModelOutput
 from unofficial_slash.network.predictor import Predictor, create_predictor
+from unofficial_slash.sampler import LengthBatchSampler, load_lengths_from_file
 from unofficial_slash.utility.pytorch_utility import (
     detach_cpu,
     init_weights,
@@ -99,19 +100,40 @@ class TrainingContext:
 def create_data_loader(
     config: Config, dataset: Dataset, for_train: bool, for_eval: bool
 ) -> DataLoader:
-    """DataLoaderを作成"""
-    batch_size = config.train.eval_batch_size if for_eval else config.train.batch_size
-    return DataLoader(
-        dataset=dataset,
-        batch_size=batch_size,
-        shuffle=True,
-        num_workers=config.train.num_processes,
-        collate_fn=collate_dataset_output,
-        pin_memory=config.train.use_gpu,
-        drop_last=for_train,
-        timeout=0 if config.train.num_processes == 0 else 30,
-        persistent_workers=config.train.num_processes > 0,
-    )
+    """動的バッチング対応DataLoaderを作成"""
+    if for_train:
+        lengths = load_lengths_from_file(config.train.train_length_path)
+        batch_sampler = LengthBatchSampler(
+            batch_bins=config.train.batch_bins,
+            lengths=lengths,
+            min_batch_size=config.train.min_batch_size,
+            max_batch_size=config.train.max_batch_size,
+            drop_last=True,
+        )
+        return DataLoader(
+            dataset=dataset,
+            batch_sampler=batch_sampler,
+            num_workers=config.train.num_processes,
+            collate_fn=collate_dataset_output,
+            pin_memory=config.train.use_gpu,
+            timeout=0 if config.train.num_processes == 0 else 30,
+            persistent_workers=config.train.num_processes > 0,
+        )
+    else:
+        batch_size = (
+            config.train.eval_batch_size if for_eval else config.train.batch_size
+        )
+        return DataLoader(
+            dataset=dataset,
+            batch_size=batch_size,
+            shuffle=True,
+            num_workers=config.train.num_processes,
+            collate_fn=collate_dataset_output,
+            pin_memory=config.train.use_gpu,
+            drop_last=for_train,
+            timeout=0 if config.train.num_processes == 0 else 30,
+            persistent_workers=config.train.num_processes > 0,
+        )
 
 
 def setup_training_context(config_yaml_path: Path, output_dir: Path) -> TrainingContext:

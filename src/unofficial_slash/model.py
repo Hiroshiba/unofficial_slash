@@ -14,6 +14,10 @@ from unofficial_slash.network.dsp.fine_structure import (
     lag_window_spectral_envelope,
 )
 from unofficial_slash.network.predictor import Predictor
+from unofficial_slash.utility.frame_mask_utils import (
+    audio_mask_to_frame_mask,
+    validate_frame_alignment,
+)
 from unofficial_slash.utility.train_utility import DataNumProtocol
 
 
@@ -38,78 +42,110 @@ class ModelOutput(DataNumProtocol):
 
 
 def pitch_consistency_loss(
-    f0_original: Tensor,  # (B, T) 元のF0値
-    f0_shifted: Tensor,  # (B, T) シフト後のF0値
-    shift_semitones: Tensor,  # (B,) ピッチシフト量（semitones）
-    delta: float,  # Huber損失のデルタ
-    f0_min: float,  # F0最小値
-    f0_max: float,  # F0最大値
+    f0_original: Tensor,  # (B, T)
+    f0_shifted: Tensor,  # (B, T)
+    shift_semitones: Tensor,  # (B,)
+    frame_mask: Tensor,  # (B, T)
+    delta: float,
+    f0_min: float,
+    f0_max: float,
 ) -> Tensor:
     """Pitch Consistency Loss (L_cons) - SLASH論文 Equation (1)"""
-    # log2(p_t) - log2(p_shift_t) + d/12 を計算
-    # 数値安定性強化: 設定値による境界でクランプ
-    f0_original_safe = torch.clamp(f0_original, min=f0_min, max=f0_max)
-    f0_shifted_safe = torch.clamp(f0_shifted, min=f0_min, max=f0_max)
+    min_frames = validate_frame_alignment(
+        f0_original.shape[1], frame_mask.shape[1], "pitch_consistency_loss", 1
+    )
+
+    f0_original_aligned = f0_original[:, :min_frames]
+    f0_shifted_aligned = f0_shifted[:, :min_frames]
+    frame_mask_aligned = frame_mask[:, :min_frames]
+
+    f0_original_safe = torch.clamp(f0_original_aligned, min=f0_min, max=f0_max)
+    f0_shifted_safe = torch.clamp(f0_shifted_aligned, min=f0_min, max=f0_max)
 
     log_diff = torch.log2(f0_original_safe) - torch.log2(f0_shifted_safe)
+    shift_octaves = shift_semitones.unsqueeze(1) / 12.0
+    target_diff = log_diff + shift_octaves
 
-    # シフト量を octaves に変換 (d/12)
-    shift_octaves = shift_semitones.unsqueeze(1) / 12.0  # (B, 1)
+    huber_loss_per_frame = huber_loss(
+        target_diff, torch.zeros_like(target_diff), delta=delta, reduction="none"
+    )
 
-    # 理想的な対数差からの差分を計算
-    target_diff = log_diff + shift_octaves  # (B, T)
+    masked_loss = huber_loss_per_frame * frame_mask_aligned.float()
+    valid_frames = frame_mask_aligned.sum()
 
-    # Huber損失を適用
-    loss = huber_loss(target_diff, torch.zeros_like(target_diff), delta=delta)
+    if valid_frames == 0:
+        raise ValueError("No valid frames for pitch consistency loss")
 
+    loss = masked_loss.sum() / valid_frames.float()
     return loss
 
 
 def pitch_guide_loss(
-    f0_logits: Tensor,  # (B, T, ?) F0ロジット分布
-    pitch_guide: Tensor,  # (B, T, ?) Pitch Guide
-    hinge_margin: float,  # ヒンジ損失のマージン
+    f0_logits: Tensor,  # (B, T, ?)
+    pitch_guide: Tensor,  # (B, T, ?)
+    frame_mask: Tensor,  # (B, T)
+    hinge_margin: float,
 ) -> Tensor:
     """Pitch Guide Loss (L_guide) - SLASH論文 Equation (3)"""
-    # F0ロジットをsoftmaxで正規化（論文の確率分布Pとして扱う）
-    normalized_probs = F.softmax(f0_logits, dim=-1)  # (B, T, ?)
+    min_frames = validate_frame_alignment(
+        f0_logits.shape[1], frame_mask.shape[1], "pitch_guide_loss", 1
+    )
 
-    # P と G の内積を計算（各フレームごと）
-    inner_product = torch.sum(normalized_probs * pitch_guide, dim=-1)  # (B, T)
+    f0_logits_aligned = f0_logits[:, :min_frames, :]
+    pitch_guide_aligned = pitch_guide[:, :min_frames, :]
+    frame_mask_aligned = frame_mask[:, :min_frames]
 
-    # ヒンジ損失: max(1 - inner_product - margin, 0)
+    normalized_probs = F.softmax(f0_logits_aligned, dim=-1)
+    inner_product = torch.sum(normalized_probs * pitch_guide_aligned, dim=-1)
     hinge_loss = torch.clamp(1.0 - inner_product - hinge_margin, min=0.0)
 
-    # 時間軸での平均
-    loss = torch.mean(hinge_loss)
+    masked_loss = hinge_loss * frame_mask_aligned.float()
+    valid_frames = frame_mask_aligned.sum()
 
+    if valid_frames == 0:
+        raise ValueError("No valid frames for pitch guide loss")
+
+    loss = masked_loss.sum() / valid_frames.float()
     return loss
 
 
 def pitch_guide_shift_loss(
-    f0_logits_shifted: Tensor,  # (B, T, F) シフトされたF0ロジット分布
-    pitch_guide_shifted: Tensor,  # (B, T, F) シフトされたPitch Guide
-    hinge_margin: float,  # ヒンジ損失のマージン
+    f0_logits_shifted: Tensor,  # (B, T, F)
+    pitch_guide_shifted: Tensor,  # (B, T, F)
+    frame_mask: Tensor,  # (B, T)
+    hinge_margin: float,
 ) -> Tensor:
     """Pitch Guide Shift Loss (L_g-shift) - SLASH論文 Section 2.3"""
-    normalized_probs_shifted = F.softmax(f0_logits_shifted, dim=-1)  # (B, T, F)
+    min_frames = validate_frame_alignment(
+        f0_logits_shifted.shape[1], frame_mask.shape[1], "pitch_guide_shift_loss", 1
+    )
 
+    f0_logits_shifted_aligned = f0_logits_shifted[:, :min_frames, :]
+    pitch_guide_shifted_aligned = pitch_guide_shifted[:, :min_frames, :]
+    frame_mask_aligned = frame_mask[:, :min_frames]
+
+    normalized_probs_shifted = F.softmax(f0_logits_shifted_aligned, dim=-1)
     inner_product = torch.sum(
-        normalized_probs_shifted * pitch_guide_shifted, dim=-1
-    )  # (B, T)
-
+        normalized_probs_shifted * pitch_guide_shifted_aligned, dim=-1
+    )
     hinge_loss = torch.clamp(1.0 - inner_product - hinge_margin, min=0.0)
 
-    loss = torch.mean(hinge_loss)
+    masked_loss = hinge_loss * frame_mask_aligned.float()
+    valid_frames = frame_mask_aligned.sum()
 
+    if valid_frames == 0:
+        raise ValueError("No valid frames for pitch guide shift loss")
+
+    loss = masked_loss.sum() / valid_frames.float()
     return loss
 
 
 def pseudo_spectrogram_loss(
-    pseudo_spectrogram: Tensor,  # (B, T, K) Pseudo Spectrogram S*
-    target_spectrogram: Tensor,  # (B, T, K) Target Spectrogram S
-    vuv_mask: Tensor,  # (B, T) V/UV mask (1: voiced, 0: unvoiced)
-    window_size: int,  # Fine structure spectrum用の窓サイズ
+    pseudo_spectrogram: Tensor,  # (B, T, K)
+    target_spectrogram: Tensor,  # (B, T, K)
+    vuv_mask: Tensor,  # (B, T)
+    frame_mask: Tensor,  # (B, T)
+    window_size: int,
 ) -> Tensor:
     """Pseudo Spectrogram Loss (L_pseudo) - SLASH論文 Equation (6)"""
     # Fine structure spectrum計算: ψ(S*) と ψ(S)
@@ -119,24 +155,42 @@ def pseudo_spectrogram_loss(
     # L1ノルム: ||ψ(S*) - ψ(S)||₁
     l1_diff = torch.abs(psi_pseudo - psi_target)  # (B, T, K)
 
-    # V/UVマスクを周波数次元に拡張: (B, T) -> (B, T, K)
-    vuv_mask_expanded = vuv_mask.unsqueeze(-1).expand_as(l1_diff)  # (B, T, K)
+    t_pseudo = pseudo_spectrogram.shape[1]
+    t_target = target_spectrogram.shape[1]
+    t_vuv = vuv_mask.shape[1]
+    t_frame = frame_mask.shape[1]
 
-    # マスクを適用: v × 1_K でのアダマール積
-    masked_loss = l1_diff * vuv_mask_expanded  # (B, T, K)
+    min_frames = min(t_pseudo, t_target, t_vuv, t_frame)
 
-    # 全体の平均
-    loss = torch.mean(masked_loss)
+    pseudo_aligned = pseudo_spectrogram[:, :min_frames, :]
+    target_aligned = target_spectrogram[:, :min_frames, :]
+    vuv_mask_aligned = vuv_mask[:, :min_frames]
+    frame_mask_aligned = frame_mask[:, :min_frames]
 
+    psi_pseudo = fine_structure_spectrum(pseudo_aligned, window_size)
+    psi_target = fine_structure_spectrum(target_aligned, window_size)
+    l1_diff = torch.abs(psi_pseudo - psi_target)
+
+    combined_mask = vuv_mask_aligned & frame_mask_aligned
+    combined_mask_expanded = combined_mask.unsqueeze(-1).expand_as(l1_diff)
+
+    masked_loss = l1_diff * combined_mask_expanded.float()
+    valid_elements = combined_mask_expanded.sum()
+
+    if valid_elements == 0:
+        raise ValueError("No valid frames for pseudo spectrogram loss")
+
+    loss = masked_loss.sum() / valid_elements.float()
     return loss
 
 
 def reconstruction_loss(
-    generated_spec_1: Tensor,  # (B, T, ?) 生成スペクトログラム S˜1
-    generated_spec_2: Tensor,  # (B, T, ?) 生成スペクトログラム S˜2
-    target_spectrogram: Tensor,  # (B, T, ?) ターゲットスペクトログラム S
-    ged_alpha: float,  # GEDの反発項重み α
-    window_size: int,  # Fine structure spectrum用の窓サイズ
+    generated_spec_1: Tensor,  # (B, T, ?)
+    generated_spec_2: Tensor,  # (B, T, ?)
+    target_spectrogram: Tensor,  # (B, T, ?)
+    frame_mask: Tensor,  # (B, T)
+    ged_alpha: float,
+    window_size: int,
 ) -> Tensor:
     """Reconstruction Loss (L_recon) - SLASH論文 Equation (8) GED"""
     # 時間軸統一処理（DifferentiableWorldとSTFTのフレーム数不一致対応）
@@ -166,15 +220,20 @@ def reconstruction_loss(
     psi_gen_2 = fine_structure_spectrum(generated_spec_2, window_size)  # (B, T, ?)
     psi_target = fine_structure_spectrum(target_spectrogram, window_size)  # (B, T, ?)
 
-    # 第1項: ||ψ(S˜1) - ψ(S)||₁
-    attraction_term = torch.mean(torch.abs(psi_gen_1 - psi_target))
+    frame_mask_aligned = frame_mask[:, :min_frames]  # (B, T)
+    mask_expanded = frame_mask_aligned.unsqueeze(-1).expand_as(psi_gen_1)  # (B, T, ?)
 
-    # 第2項: α ||ψ(S˜1) - ψ(S˜2)||₁ (反発項)
-    repulsion_term = torch.mean(torch.abs(psi_gen_1 - psi_gen_2))
+    attraction_loss = torch.abs(psi_gen_1 - psi_target) * mask_expanded.float()
+    repulsion_loss = torch.abs(psi_gen_1 - psi_gen_2) * mask_expanded.float()
 
-    # GED損失: attraction - α * repulsion
+    valid_elements = mask_expanded.sum()
+    if valid_elements == 0:
+        raise ValueError("No valid frames for reconstruction loss")
+
+    attraction_term = attraction_loss.sum() / valid_elements.float()
+    repulsion_term = repulsion_loss.sum() / valid_elements.float()
+
     ged_loss = attraction_term - ged_alpha * repulsion_term
-
     return ged_loss
 
 
@@ -271,6 +330,13 @@ class Model(nn.Module):
         assert batch.pitch_label is None, "学習時にbatch.pitch_labelはNoneであるべき"
 
         device = batch.audio.device
+        config = self.predictor.network_config
+
+        # フレーム単位マスクを事前作成
+        frame_mask = audio_mask_to_frame_mask(
+            batch.attention_mask,
+            hop_length=config.cqt_hop_length,
+        )
 
         # forward_with_shift()を常に使用（学習専用の統一フロー）
         (
@@ -286,6 +352,7 @@ class Model(nn.Module):
             f0_original=f0_values,
             f0_shifted=f0_values_shifted,
             shift_semitones=batch.pitch_shift_semitones,
+            frame_mask=frame_mask,
             delta=self.model_config.huber_delta,
             f0_min=self.model_config.f0_min,
             f0_max=self.model_config.f0_max,
@@ -297,6 +364,7 @@ class Model(nn.Module):
         loss_guide = pitch_guide_loss(
             f0_logits=f0_logits,
             pitch_guide=pitch_guide,
+            frame_mask=frame_mask,
             hinge_margin=self.model_config.hinge_margin,
         )
 
@@ -308,6 +376,7 @@ class Model(nn.Module):
         loss_g_shift = pitch_guide_shift_loss(
             f0_logits_shifted=f0_logits_shifted,
             pitch_guide_shifted=pitch_guide_shifted,
+            frame_mask=frame_mask,
             hinge_margin=self.model_config.hinge_margin,
         )
 
@@ -383,11 +452,11 @@ class Model(nn.Module):
                 f"1フレーム差は正常（nnAudio CQTとtorch.stftの実装方式差）、2フレーム以上は異常。"
             )
 
-        # L_pseudo損失
         loss_pseudo = pseudo_spectrogram_loss(
             pseudo_spectrogram=pseudo_spectrogram,
             target_spectrogram=target_spectrogram,
             vuv_mask=vuv_mask,
+            frame_mask=frame_mask,
             window_size=self.predictor.pitch_guide_generator.window_size,
         )
 
@@ -405,6 +474,7 @@ class Model(nn.Module):
             generated_spec_1=generated_spec_1,
             generated_spec_2=generated_spec_2,
             target_spectrogram=target_spectrogram,
+            frame_mask=frame_mask,
             ged_alpha=self.model_config.ged_alpha,
             window_size=self.predictor.pitch_guide_generator.window_size,
         )
@@ -426,11 +496,28 @@ class Model(nn.Module):
         # 2. 拡張データでの推論: p_aug, P_aug, A_aug を取得
         f0_logits_aug, f0_values_aug, bap_aug = self.predictor(audio_aug_volume)
 
-        # 3. L_aug損失: p と p_aug のHuber損失 (論文 Section 2.6)
-        # "The first loss L_aug is similar to L_cons, which is defined as the Huber norm between p and p_aug"
-        loss_aug = huber_loss(
-            f0_values, f0_values_aug, delta=self.model_config.huber_delta
+        min_frames_aug = validate_frame_alignment(
+            f0_values.shape[1], frame_mask.shape[1], "L_aug_loss", 1
         )
+
+        f0_values_aligned = f0_values[:, :min_frames_aug]
+        f0_values_aug_aligned = f0_values_aug[:, :min_frames_aug]
+        frame_mask_aligned = frame_mask[:, :min_frames_aug]
+
+        huber_loss_per_frame_aug = huber_loss(
+            f0_values_aligned,
+            f0_values_aug_aligned,
+            delta=self.model_config.huber_delta,
+            reduction="none",
+        )
+
+        masked_loss_aug = huber_loss_per_frame_aug * frame_mask_aligned.float()
+        valid_frames_aug = frame_mask_aligned.sum()
+
+        if valid_frames_aug == 0:
+            raise ValueError("No valid frames for L_aug loss")
+
+        loss_aug = masked_loss_aug.sum() / valid_frames_aug.float()
 
         # 4. L_g-aug損失: 拡張データでのPitch Guide損失 (論文 Section 2.6)
         # "The second loss L_g-aug is almost the same as L_g, except that P is substituted with P_aug"
@@ -438,6 +525,7 @@ class Model(nn.Module):
         loss_g_aug = pitch_guide_loss(
             f0_logits=f0_logits_aug,
             pitch_guide=pitch_guide_aug,
+            frame_mask=frame_mask,
             hinge_margin=self.model_config.hinge_margin,
         )
 
@@ -446,9 +534,26 @@ class Model(nn.Module):
         bap_upsampled_original, _ = interpolate_bap_log_space(bap, freq_bins)
         bap_upsampled_aug, _ = interpolate_bap_log_space(bap_aug, freq_bins)
 
-        # L_ap損失: 対数振幅領域で直接計算（効率性最適化）
-        # log(exp(BAP1)) - log(exp(BAP2)) = BAP1 - BAP2
-        loss_ap = torch.mean(torch.abs(bap_upsampled_aug - bap_upsampled_original))
+        min_frames_ap = validate_frame_alignment(
+            bap_upsampled_original.shape[1], frame_mask.shape[1], "L_ap_loss", 1
+        )
+
+        bap_original_aligned = bap_upsampled_original[:, :min_frames_ap, :]
+        bap_aug_aligned = bap_upsampled_aug[:, :min_frames_ap, :]
+        frame_mask_ap_aligned = frame_mask[:, :min_frames_ap]
+
+        ap_diff_per_frame = torch.abs(bap_aug_aligned - bap_original_aligned)
+        mask_expanded_ap = frame_mask_ap_aligned.unsqueeze(-1).expand_as(
+            ap_diff_per_frame
+        )
+
+        masked_ap_loss = ap_diff_per_frame * mask_expanded_ap.float()
+        valid_elements_ap = mask_expanded_ap.sum()
+
+        if valid_elements_ap == 0:
+            raise ValueError("No valid frames for L_ap loss")
+
+        loss_ap = masked_ap_loss.sum() / valid_elements_ap.float()
 
         # 全SLASH損失の重み付き合成（ノイズロバスト損失追加）
         total_loss = (

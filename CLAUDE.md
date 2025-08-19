@@ -8,8 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### 優先度の高い残存タスク
 
-- 動的バッチング未実装
-  - `batch.py`/`dataset.py`: 固定長前提でのパディング。平均バッチサイズ17相当の効率化は今後の学習スケールで効く。
+- 動的バッチング実装
+   - 長さファイルを作るscriptを書いて、テストからそれを使う
+   - 平均17バッチになる値を計算する
 
 - 部分部分でtorch compileしていく
   - 全体でコンパイルするのはCQTがあるため不可能

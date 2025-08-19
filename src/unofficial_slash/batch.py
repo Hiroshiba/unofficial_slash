@@ -4,6 +4,7 @@ from dataclasses import dataclass
 
 import torch
 from torch import Tensor
+from torch.nn.utils.rnn import pad_sequence
 
 from unofficial_slash.data.data import OutputData
 
@@ -12,9 +13,11 @@ from unofficial_slash.data.data import OutputData
 class BatchOutput:
     """バッチ処理後のデータ構造"""
 
-    audio: Tensor  # (B, T) 音声波形
-    pitch_label: Tensor | None  # (B, T) ピッチラベル（学習時はNone）
+    audio: Tensor  # (B, T) 音声波形（パディング済み）
+    pitch_label: Tensor | None  # (B, T) ピッチラベル（学習時はNone、パディング済み）
     pitch_shift_semitones: Tensor  # (B,) ピッチシフト量
+    attention_mask: Tensor  # (B, T) 実データ位置マスク（1: 実データ、0: パディング）
+    lengths: Tensor  # (B,) 各サンプルの実長さ
 
     @property
     def data_num(self) -> int:
@@ -22,35 +25,55 @@ class BatchOutput:
         return self.audio.shape[0]
 
 
-def collate_stack(values: list[Tensor]) -> Tensor:
-    """Tensorのリストをスタックする"""
-    return torch.stack(values)
+def collate_pad_sequence(
+    values: list[Tensor], 
+    batch_first: bool,
+) -> tuple[Tensor, Tensor, Tensor]:
+    """可変長Tensorのリストをパディングしてattention maskを生成"""
+    if len(values) == 0:
+        raise ValueError("values is empty")
+    
+    lengths = torch.tensor([len(v) for v in values], dtype=torch.long)
+    padded_tensor = pad_sequence(values, batch_first=batch_first, padding_value=0.0)
+    
+    batch_size = len(values)
+    max_length = padded_tensor.shape[1] if batch_first else padded_tensor.shape[0]
+    
+    attention_mask = torch.zeros(batch_size, max_length, dtype=torch.bool)
+    for i, length in enumerate(lengths):
+        attention_mask[i, :length] = True
+    
+    return padded_tensor, attention_mask, lengths
 
 
 def collate_dataset_output(data_list: list[OutputData]) -> BatchOutput:
-    """OutputDataのリストをBatchOutputに変換"""
-    # FIXME: Phase 2でDynamic batching対応時にpad_sequence()使用
-    # FIXME: Phase 2では attention_mask と実際の長さ情報も含める必要
+    """OutputDataのリストを動的バッチング対応BatchOutputに変換"""
     if len(data_list) == 0:
         raise ValueError("batch is empty")
 
-    # ピッチシフト情報の処理
+    audio_tensors = [d.audio for d in data_list]
+    audio_padded, attention_mask, lengths = collate_pad_sequence(
+        values=audio_tensors, batch_first=True
+    )
+
     pitch_shifts = [d.pitch_shift_semitones for d in data_list]
     shift_tensor = torch.tensor(pitch_shifts, dtype=torch.float32)
 
-    # pitch_labelのNoneケース対応
     pitch_labels = [d.pitch_label for d in data_list]
     if all(label is None for label in pitch_labels):
-        # 全部Noneの場合（学習時）
         pitch_label_tensor = None
     elif all(label is not None for label in pitch_labels):
-        # 全部存在する場合（評価時）
-        pitch_label_tensor = collate_stack(pitch_labels)
+        pitch_label_tensor, _, _ = collate_pad_sequence(
+            values=[label for label in pitch_labels if label is not None], 
+            batch_first=True
+        )
     else:
         raise ValueError("バッチ内でpitch_labelのNone/非Noneが混在している")
 
     return BatchOutput(
-        audio=collate_stack([d.audio for d in data_list]),
+        audio=audio_padded,
         pitch_label=pitch_label_tensor,
         pitch_shift_semitones=shift_tensor,
+        attention_mask=attention_mask,
+        lengths=lengths,
     )

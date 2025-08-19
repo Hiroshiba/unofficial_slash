@@ -22,19 +22,15 @@ class LazyInputData:
     audio_path: Path
     pitch_label_path: Path | None
 
-    def generate(self) -> InputData:
+    def generate(self, *, sample_rate: int) -> InputData:
         """ファイルからデータを読み込んでInputDataを生成"""
         # 音声ファイル読み込み
         audio, sr = torchaudio.load(self.audio_path)
+        assert sr == sample_rate, f"Expected sample rate {sample_rate}, but got {sr}"
 
         # モノラル変換（ステレオの場合は左チャンネルのみ使用）
         if audio.shape[0] > 1:
             audio = audio[0:1, :]  # 最初のチャンネルのみ
-
-        # 24kHzにリサンプリング（SLASH論文仕様）
-        if sr != 24000:
-            resampler = torchaudio.transforms.Resample(orig_freq=sr, new_freq=24000)
-            audio = resampler(audio)
 
         # ピッチラベル読み込み（オプション）
         pitch_data = None
@@ -70,15 +66,12 @@ class Dataset(BaseDataset[OutputData]):
         """指定されたインデックスのデータを前処理して返す"""
         data = self.datas[i]
         if isinstance(data, LazyInputData):
-            data = data.generate()
+            data = data.generate(sample_rate=self.config.sample_rate)
 
         return preprocess(
             data,
-            frame_rate=self.config.frame_rate,
-            frame_length=self.config.frame_length,
             is_eval=self.is_eval,
             pitch_shift_range=self.config.pitch_shift_range,
-            sample_rate=self.config.sample_rate,
         )
 
 

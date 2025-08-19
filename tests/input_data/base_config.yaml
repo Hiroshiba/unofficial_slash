@@ -11,8 +11,6 @@ dataset:
   eval_times_num: 1
   seed: 42
   sample_rate: 24000
-  frame_rate: 200.0
-  frame_length: 480
 
   # ピッチシフト
   pitch_shift_range: 14
@@ -88,6 +86,13 @@ model:
 train:
   batch_size: 5 # NOTE: SLASH論文では17
   eval_batch_size: 5
+
+  # 動的バッチング設定
+  batch_bins: 800000 # TODO: SLASH用に合わせる
+  min_batch_size: 1
+  max_batch_size: 32
+  train_length_path: "tests/data/test_data/train_lengths.txt"
+
   log_epoch: 1
   eval_epoch: 2
   snapshot_epoch: 3

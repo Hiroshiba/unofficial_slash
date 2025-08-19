@@ -25,8 +25,6 @@ class DatasetConfig(BaseModel):
     eval_times_num: int = 1
     seed: int = 0
     sample_rate: int
-    frame_rate: float
-    frame_length: int
 
     # ピッチシフト設定
     pitch_shift_range: int
@@ -114,6 +112,13 @@ class TrainConfig(BaseModel):
 
     batch_size: int
     eval_batch_size: int
+
+    # 動的バッチング設定
+    batch_bins: int
+    min_batch_size: int
+    max_batch_size: int
+    train_length_path: Path
+
     log_epoch: int
     eval_epoch: int
     snapshot_epoch: int

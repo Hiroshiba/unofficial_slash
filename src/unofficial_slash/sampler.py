@@ -1,0 +1,85 @@
+"""
+動的バッチング用サンプラーモジュール
+
+ESPNet2のLengthBatchSamplerを移植・改変
+Original: https://github.com/espnet/espnet (Apache 2.0 License)
+"""
+
+from pathlib import Path
+from typing import Iterator
+
+import torch
+from torch.utils.data import Sampler
+
+
+class LengthBatchSampler(Sampler[list[int]]):
+    """ESPNet2のLengthBatchSamplerを移植した動的バッチサンプラー"""
+
+    def __init__(
+        self,
+        batch_bins: int,
+        lengths: list[int],
+        min_batch_size: int,
+        max_batch_size: int,
+        drop_last: bool,
+    ):
+        self.batch_bins = batch_bins
+        self.lengths = lengths
+        self.min_batch_size = min_batch_size
+        self.max_batch_size = max_batch_size
+        self.drop_last = drop_last
+
+        self._make_batches()
+
+    def _make_batches(self) -> None:
+        """シーケンス長に基づいてバッチを作成"""
+        indices_and_lengths = list(enumerate(self.lengths))
+        indices_and_lengths.sort(key=lambda x: x[1])
+
+        batches = []
+        current_batch = []
+        current_bins = 0
+
+        for idx, length in indices_and_lengths:
+            if len(current_batch) == 0:
+                current_batch.append(idx)
+                current_bins = length
+            else:
+                max_length = max(length, current_bins // len(current_batch))
+                required_bins = max_length * (len(current_batch) + 1)
+
+                if (
+                    required_bins <= self.batch_bins
+                    and len(current_batch) < self.max_batch_size
+                ):
+                    current_batch.append(idx)
+                    current_bins = required_bins
+                else:
+                    if len(current_batch) >= self.min_batch_size:
+                        batches.append(current_batch)
+                    current_batch = [idx]
+                    current_bins = length
+
+        if current_batch and (
+            not self.drop_last or len(current_batch) >= self.min_batch_size
+        ):
+            batches.append(current_batch)
+
+        self.batches = batches
+
+    def __iter__(self) -> Iterator[list[int]]:
+        """バッチのイテレータを返す"""
+        indices = torch.randperm(len(self.batches)).tolist()
+        for i in indices:
+            batch = self.batches[i]
+            yield batch
+
+    def __len__(self) -> int:
+        """バッチ数を返す"""
+        return len(self.batches)
+
+
+def load_lengths_from_file(length_file_path: Path) -> list[int]:
+    """音声長ファイルから各サンプルの長さを読み込み"""
+    content = length_file_path.read_text()
+    return [int(line) for line in content.splitlines() if line]

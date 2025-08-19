@@ -7,6 +7,10 @@ from torch import Tensor, nn
 
 from unofficial_slash.batch import BatchOutput
 from unofficial_slash.generator import Generator
+from unofficial_slash.utility.frame_mask_utils import (
+    audio_mask_to_frame_mask,
+    validate_frame_alignment,
+)
 from unofficial_slash.utility.train_utility import DataNumProtocol
 
 
@@ -25,30 +29,30 @@ def calculate_value(output: EvaluatorOutput) -> Tensor:
 
 
 def raw_pitch_accuracy(
-    predicted_f0: Tensor,  # (B, T) 予測F0値
-    target_f0: Tensor,  # (B, T) ターゲットF0値
-    cents_threshold: float = 50.0,  # cent単位の閾値
-    f0_min: float = 20.0,  # F0最小値
-    f0_max: float = 2000.0,  # F0最大値
+    predicted_f0: Tensor,  # (B, T)
+    target_f0: Tensor,  # (B, T)
+    frame_mask: Tensor,  # (B, T)
+    cents_threshold: float,
+    f0_min: float,
+    f0_max: float,
 ) -> tuple[Tensor, Tensor]:
     """Raw Pitch Accuracy (RPA) - SLASH論文評価指標"""
-    t_pred = predicted_f0.shape[1]
-    t_target = target_f0.shape[1]
-    frame_diff = abs(t_pred - t_target)
-    if frame_diff > 1:
-        raise ValueError(
-            f"Frame count mismatch too large: predicted_f0={t_pred}, target_f0={t_target} "
-            f"(diff={frame_diff}). Check CQT/STFT parameter consistency."
-        )
-    min_frames = min(t_pred, t_target)
+    min_frames = validate_frame_alignment(
+        predicted_f0.shape[1], target_f0.shape[1], "raw_pitch_accuracy_pred_target", 1
+    )
+    min_frames = validate_frame_alignment(
+        min_frames, frame_mask.shape[1], "raw_pitch_accuracy_frame_mask", 1
+    )
+
     predicted_f0_aligned = predicted_f0[:, :min_frames]
     target_f0_aligned = target_f0[:, :min_frames]
+    frame_mask_aligned = frame_mask[:, :min_frames]
 
-    # 有声フレーム判定: target_f0 > 0 かつ有効範囲内
     voiced_mask = (
         (target_f0_aligned > 0)
         & (target_f0_aligned >= f0_min)
         & (target_f0_aligned <= f0_max)
+        & frame_mask_aligned
     )
 
     if voiced_mask.sum() == 0:
@@ -78,29 +82,29 @@ def raw_pitch_accuracy(
 
 
 def log_f0_rmse(
-    predicted_f0: Tensor,  # (B, T) 予測F0値
-    target_f0: Tensor,  # (B, T) ターゲットF0値
-    f0_min: float = 20.0,  # F0最小値
-    f0_max: float = 2000.0,  # F0最大値
+    predicted_f0: Tensor,  # (B, T)
+    target_f0: Tensor,  # (B, T)
+    frame_mask: Tensor,  # (B, T)
+    f0_min: float,
+    f0_max: float,
 ) -> Tensor:
     """log-F0 RMSE - SLASH論文評価指標"""
-    t_pred = predicted_f0.shape[1]
-    t_target = target_f0.shape[1]
-    frame_diff = abs(t_pred - t_target)
-    if frame_diff > 1:
-        raise ValueError(
-            f"Frame count mismatch too large: predicted_f0={t_pred}, target_f0={t_target} "
-            f"(diff={frame_diff}). Check CQT/STFT parameter consistency."
-        )
-    min_frames = min(t_pred, t_target)
+    min_frames = validate_frame_alignment(
+        predicted_f0.shape[1], target_f0.shape[1], "log_f0_rmse_pred_target", 1
+    )
+    min_frames = validate_frame_alignment(
+        min_frames, frame_mask.shape[1], "log_f0_rmse_frame_mask", 1
+    )
+
     predicted_f0_aligned = predicted_f0[:, :min_frames]
     target_f0_aligned = target_f0[:, :min_frames]
+    frame_mask_aligned = frame_mask[:, :min_frames]
 
-    # 有声フレーム判定: target_f0 > 0 かつ有効範囲内
     voiced_mask = (
         (target_f0_aligned > 0)
         & (target_f0_aligned >= f0_min)
         & (target_f0_aligned <= f0_max)
+        & frame_mask_aligned
     )
 
     if voiced_mask.sum() == 0:
@@ -134,22 +138,35 @@ class Evaluator(nn.Module):
     @torch.no_grad()
     def forward(self, batch: BatchOutput) -> EvaluatorOutput:
         """データをネットワークに入力して評価値を計算する"""
-        # ジェネレーターでF0を予測
         generator_output = self.generator(batch.audio)
         predicted_f0 = generator_output.f0_values  # (B, T)
+
+        if batch.pitch_label is None:
+            raise ValueError("Evaluator requires pitch_label for evaluation")
+
         target_f0 = batch.pitch_label  # (B, T)
 
-        # RPA (50cents) 計算
+        config = self.generator.predictor.network_config
+        frame_mask = audio_mask_to_frame_mask(
+            batch.attention_mask,
+            hop_length=config.cqt_hop_length,
+        )
+
         rpa_50c, voiced_frames = raw_pitch_accuracy(
             predicted_f0=predicted_f0,
             target_f0=target_f0,
+            frame_mask=frame_mask,
             cents_threshold=50.0,
+            f0_min=20.0,
+            f0_max=2000.0,
         )
 
-        # log-F0 RMSE 計算
         rmse = log_f0_rmse(
             predicted_f0=predicted_f0,
             target_f0=target_f0,
+            frame_mask=frame_mask,
+            f0_min=20.0,
+            f0_max=2000.0,
         )
 
         return EvaluatorOutput(
