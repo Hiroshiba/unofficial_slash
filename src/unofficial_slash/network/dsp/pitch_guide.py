@@ -42,8 +42,8 @@ def convert_to_log_frequency_scale(
         )
 
     valid_indices = torch.where(valid_mask)[0]
-    start_idx = int(valid_indices[0].item())
-    end_idx = int(valid_indices[-1].item() + 1)
+    start_idx = valid_indices[0]
+    end_idx = valid_indices[-1] + 1
 
     valid_spectrum = linear_spectrum[:, :, start_idx:end_idx]
     valid_freq_bins = end_idx - start_idx
@@ -69,25 +69,40 @@ def subharmonic_summation(
     f_max: float,
 ) -> Tensor:
     """Subharmonic Summation (SHS) アルゴリズム"""
-    _, _, freq_bins = log_spectrum.shape
-    cents_per_bin = 1200.0 * math.log2(f_max / f_min) / (freq_bins - 1)
-    shs_spectrum = log_spectrum.clone()
+    batch_size, T, F = log_spectrum.shape
     device = log_spectrum.device
+    dtype = log_spectrum.dtype
+
+    cents_per_bin = 1200.0 * math.log2(f_max / f_min) / (F - 1)
 
     n_vals = torch.arange(2, n_max + 1, device=device)
     shift_cents = 1200.0 * torch.log2(n_vals.to(torch.float32))
     shift_bins = torch.round(shift_cents / cents_per_bin).to(torch.int64)
-    weights = (0.86 ** (n_vals - 1)).to(log_spectrum.dtype)  # 論文準拠: βn = 0.86^(n-1)
+    weights = (0.86 ** (n_vals - 1)).to(dtype)
 
-    valid_mask = (shift_bins > 0) & (shift_bins < freq_bins)
-    if torch.any(valid_mask):
-        shift_bins = shift_bins[valid_mask]
-        weights = weights[valid_mask]
+    # 使えるシフトだけ抽出（0 < s < F）
+    valid = (shift_bins > 0) & (shift_bins < F)
+    s = shift_bins[valid]  # (S,)
+    w = weights[valid]  # (S,)
 
-        for s, w in zip(shift_bins.tolist(), weights.tolist(), strict=True):
-            shs_spectrum[..., s:].add_(log_spectrum[..., :-s], alpha=w)
+    # S が 0 の場合でも以下はそのまま動作（サイズ0の和は0）
+    # 出力位置 j と入力位置 (j - s) を作る
+    j = torch.arange(F, device=device)  # (F,)
+    idx = j.unsqueeze(0) - s.unsqueeze(1)  # (S, F)
+    mask = (idx >= 0) & (idx < F)  # (S, F)  範囲外はゼロ寄与
+    idx_clamped = idx.clamp(0, F - 1)  # gather用にクランプ
 
-    return shs_spectrum
+    # x[..., j - s] をまとめて取得して重みを掛けて合計
+    x = log_spectrum
+    x_exp = x.unsqueeze(-2).expand(batch_size, T, s.shape[0], F)  # (B, T, S, F)
+    idx_exp = (
+        idx_clamped.unsqueeze(0).unsqueeze(0).expand(batch_size, T, -1, -1)
+    )  # (B, T, S, F)
+    shifted = torch.gather(x_exp, -1, idx_exp)  # (B, T, S, F)
+    shifted = shifted * mask.to(dtype).unsqueeze(0).unsqueeze(0)  # 無効部ゼロ化
+    sum_shifts = (shifted * w.view(1, 1, -1, 1)).sum(dim=-2)  # (B, T, F)
+
+    return x + sum_shifts
 
 
 class PitchGuideGenerator(nn.Module):
@@ -119,23 +134,9 @@ class PitchGuideGenerator(nn.Module):
         self.n_pitch_bins = n_pitch_bins
 
     def forward(self, waveform: Tensor) -> Tensor:  # (B, T) -> (B, T, F)
-        """
-        音声波形からPitch Guideを生成
-
-        Args:
-            waveform: 入力音声波形 (B, T)
-
-        Returns
-        -------
-            Pitch Guide G (B, T, F) - F = n_pitch_bins
-        """
+        """音声波形からPitch Guideを生成"""
         device = waveform.device
 
-        # FIXME: STFTとCQTの周波数軸不整合問題 - Phase 4c で解決必要
-        # 1. PredictorではCQTを使用しているが、ここではSTFTを使用
-        # 2. 周波数分解能や時間分解能の違いによる特徴不整合が生じる可能性
-        # 3. 統一されたCQTベース処理への変更を検討すべき
-        # STFTで振幅スペクトログラムを計算
         stft_result = torch.stft(
             waveform,
             n_fft=self.n_fft,
@@ -176,6 +177,7 @@ class PitchGuideGenerator(nn.Module):
 
         return normalized_spectrum
 
+    @torch.compile()
     def shift_pitch_guide(
         self,
         pitch_guide: Tensor,  # (B, T, F)

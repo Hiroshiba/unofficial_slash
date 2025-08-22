@@ -1,12 +1,14 @@
 """バッチ処理モジュール"""
 
 from dataclasses import dataclass
+from typing import Self
 
 import torch
 from torch import Tensor
 from torch.nn.utils.rnn import pad_sequence
 
 from unofficial_slash.data.data import OutputData
+from unofficial_slash.utility.pytorch_utility import to_device
 
 
 @dataclass
@@ -23,6 +25,22 @@ class BatchOutput:
     def data_num(self) -> int:
         """バッチサイズを返す"""
         return self.audio.shape[0]
+
+    def to_device(self, device: str, non_blocking: bool = False) -> Self:
+        """データを指定されたデバイスに移動"""
+        self.audio = to_device(self.audio, device, non_blocking=non_blocking)
+        if self.pitch_label is not None:
+            self.pitch_label = to_device(
+                self.pitch_label, device, non_blocking=non_blocking
+            )
+        self.pitch_shift_semitones = to_device(
+            self.pitch_shift_semitones, device, non_blocking=non_blocking
+        )
+        self.attention_mask = to_device(
+            self.attention_mask, device, non_blocking=non_blocking
+        )
+        self.lengths = to_device(self.lengths, device, non_blocking=non_blocking)
+        return self
 
 
 def collate_pad_sequence(

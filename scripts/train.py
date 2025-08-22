@@ -11,7 +11,7 @@ from torch.amp.autocast_mode import autocast
 from torch.amp.grad_scaler import GradScaler
 from torch.utils.data import DataLoader
 
-from unofficial_slash.batch import collate_dataset_output
+from unofficial_slash.batch import BatchOutput, collate_dataset_output
 from unofficial_slash.config import Config, DataFileConfig
 from unofficial_slash.dataset import Dataset, DatasetType, create_dataset
 from unofficial_slash.evaluator import (
@@ -28,7 +28,6 @@ from unofficial_slash.utility.pytorch_utility import (
     init_weights,
     make_optimizer,
     make_scheduler,
-    to_device,
 )
 from unofficial_slash.utility.train_utility import (
     DataNumProtocol,
@@ -247,12 +246,13 @@ def train_one_epoch(context: TrainingContext) -> TrainingResults:
     if hasattr(context.optimizer, "train"):
         context.optimizer.train()  # type: ignore
 
+    batch: BatchOutput
     train_results: list[ModelOutput] = []
     for batch in context.train_loader:
         context.iteration += 1
 
         with autocast(context.device, enabled=context.config.train.use_amp):
-            batch = to_device(batch, context.device, non_blocking=True)
+            batch = batch.to_device(context.device, non_blocking=True)
             result: ModelOutput = context.model(batch)
 
         loss = result.loss
@@ -279,10 +279,12 @@ def evaluate(context: TrainingContext) -> EvaluationResults:
     if hasattr(context.optimizer, "eval"):
         context.optimizer.eval()  # type: ignore
 
+    batch: BatchOutput
+
     # test評価
     test_result_list: list[ModelOutput] = []
     for batch in context.test_loader:
-        batch = to_device(batch, context.device, non_blocking=True)
+        batch = batch.to_device(context.device, non_blocking=True)
         result = context.model(batch)
         test_result_list.append(detach_cpu(result))
     test_result = reduce_result(test_result_list)
@@ -292,7 +294,7 @@ def evaluate(context: TrainingContext) -> EvaluationResults:
     eval_result_list: list[EvaluatorOutput] = []
     if context.eval_loader is not None:
         for batch in context.eval_loader:
-            batch = to_device(batch, context.device, non_blocking=True)
+            batch = batch.to_device(context.device, non_blocking=True)
             result = context.evaluator(batch)
             eval_result_list.append(detach_cpu(result))
         eval_result = reduce_result(eval_result_list)
@@ -302,7 +304,7 @@ def evaluate(context: TrainingContext) -> EvaluationResults:
     if context.valid_loader is not None:
         valid_result_list: list[EvaluatorOutput] = []
         for batch in context.valid_loader:
-            batch = to_device(batch, context.device, non_blocking=True)
+            batch = batch.to_device(context.device, non_blocking=True)
             result = context.evaluator(batch)
             valid_result_list.append(detach_cpu(result))
         valid_result = reduce_result(valid_result_list)

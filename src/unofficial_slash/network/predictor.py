@@ -23,6 +23,7 @@ def create_log_frequency_scale(f0_bins: int, fmin: float, fmax: float) -> Tensor
     return torch.exp(log_freqs)  # (f0_bins,)
 
 
+@torch.compile()
 def f0_logits_to_f0(f0_logits: Tensor, frequency_scale: Tensor) -> Tensor:
     """F0ロジット分布から重み付き平均でF0値を計算"""
     # f0_logits: (B, T, f0_bins)
@@ -40,6 +41,7 @@ def f0_logits_to_f0(f0_logits: Tensor, frequency_scale: Tensor) -> Tensor:
     return f0_values
 
 
+@torch.compile()
 def shift_cqt_frequency(
     cqt: Tensor,  # (B, ?, T)
     shift_semitones: Tensor,  # (B,)
@@ -55,7 +57,7 @@ def shift_cqt_frequency(
     cqt_shifted = torch.zeros_like(cqt)
 
     for b in range(batch_size):
-        shift = shift_bins[b].item()
+        shift = shift_bins[b]
         if shift == 0:
             cqt_shifted[b] = cqt[b]
         elif shift > 0:
@@ -84,7 +86,7 @@ class Predictor(nn.Module):
         hop_length = network_config.frame_length
 
         # GPU対応CQT変換器（nnAudio）
-        self.cqt_transform = CQT(
+        self.cqt_transform = CQT(  # NOTE: CQTはtorch.compileできない
             sr=sample_rate,
             hop_length=hop_length,
             fmin=network_config.cqt_fmin,
@@ -201,6 +203,7 @@ class Predictor(nn.Module):
             f0_values_shift,
         )
 
+    @torch.compile()
     def encode_cqt(
         self,
         cqt: Tensor,  # (B, ?, T)
