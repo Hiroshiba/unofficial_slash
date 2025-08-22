@@ -5,8 +5,8 @@ ESPNet2のLengthBatchSamplerを移植・改変
 Original: https://github.com/espnet/espnet (Apache 2.0 License)
 """
 
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator
 
 import torch
 from torch.utils.data import Sampler

@@ -8,12 +8,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### 優先度の高い残存タスク
 
-- 動的バッチング実装
-   - 長さファイルを作るscriptを書いて、テストからそれを使う
-   - 平均17バッチになる値を計算する
+- cqt_hop_lengthとpseudo_spec_hop_lengthをなくしてframe_rateにする
 
 - 部分部分でtorch compileしていく
   - 全体でコンパイルするのはCQTがあるため不可能
+
+- 許容するフレーム数の量と判定ロジックを共通化したい
+  - 便利関数を使っていたり使っていなかったりする、可能なら使う方に統一したいのと、２種以上のtensorを受け取れるようにしたい
+  - 最大で2フレームまで許容する方に倒したい
+  - TODOコメントとして許容できるフレーム数の誤差を減らしたいと書き加える
 
 ### 主要な特徴
 - 相対的なピッチ差学習（ピッチシフト利用）

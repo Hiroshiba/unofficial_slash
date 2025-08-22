@@ -26,23 +26,23 @@ class BatchOutput:
 
 
 def collate_pad_sequence(
-    values: list[Tensor], 
+    values: list[Tensor],
     batch_first: bool,
 ) -> tuple[Tensor, Tensor, Tensor]:
     """可変長Tensorのリストをパディングしてattention maskを生成"""
     if len(values) == 0:
         raise ValueError("values is empty")
-    
+
     lengths = torch.tensor([len(v) for v in values], dtype=torch.long)
     padded_tensor = pad_sequence(values, batch_first=batch_first, padding_value=0.0)
-    
+
     batch_size = len(values)
     max_length = padded_tensor.shape[1] if batch_first else padded_tensor.shape[0]
-    
+
     attention_mask = torch.zeros(batch_size, max_length, dtype=torch.bool)
     for i, length in enumerate(lengths):
         attention_mask[i, :length] = True
-    
+
     return padded_tensor, attention_mask, lengths
 
 
@@ -64,8 +64,8 @@ def collate_dataset_output(data_list: list[OutputData]) -> BatchOutput:
         pitch_label_tensor = None
     elif all(label is not None for label in pitch_labels):
         pitch_label_tensor, _, _ = collate_pad_sequence(
-            values=[label for label in pitch_labels if label is not None], 
-            batch_first=True
+            values=[label for label in pitch_labels if label is not None],
+            batch_first=True,
         )
     else:
         raise ValueError("バッチ内でpitch_labelのNone/非Noneが混在している")

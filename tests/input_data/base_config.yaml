@@ -2,10 +2,14 @@ dataset:
   train:
     audio_pathlist_path: "tests/data/test_data/train_audio_pathlist.txt"
     pitch_label_pathlist_path: null
+    length_file_path: "train_lengths.txt"
+    batch_bins: 8000
     root_dir: "tests/data/test_data"
   valid:
     audio_pathlist_path: "tests/data/test_data/valid_audio_pathlist.txt"
     pitch_label_pathlist_path: "tests/data/test_data/valid_pitch_pathlist.txt"
+    length_file_path: "valid_lengths.txt"
+    batch_bins: 4000
     root_dir: "tests/data/test_data"
   test_num: 16
   eval_times_num: 1
@@ -19,16 +23,16 @@ network:
   sample_rate: 24000
 
   # Pitch Encoder
-  f0_bins: 1024
+  f0_bins: 64 # NOTE: テスト用に縮小、論文では1024
   bap_bins: 8
-  nansy_conv_channels: 16 # NOTE: テスト用に縮小、論文で不明記、128くらい？
+  nansy_conv_channels: 4 # NOTE: テスト用に縮小、論文で不明記、128くらい？
   nansy_num_resblocks: 1 # NOTE: テスト用に縮小、論文では2
   nansy_resblock_kernel_size: 3
-  nansy_gru_hidden_size: 32 # NOTE: テスト用に縮小、論文で不明記、256くらい？
+  nansy_gru_hidden_size: 5 # NOTE: テスト用に縮小、論文で不明記、256くらい？
   nansy_gru_bidirectional: true # NOTE: 論文で不明記
 
   # CQT
-  cqt_bins: 176
+  cqt_bins: 49 # NOTE: テスト用に縮小、論文では176
   cqt_total_bins: 205
   cqt_hop_length: 120
   cqt_bins_per_octave: 24
@@ -86,12 +90,8 @@ model:
 train:
   batch_size: 5 # NOTE: SLASH論文では17
   eval_batch_size: 5
-
-  # 動的バッチング設定
-  batch_bins: 800000 # TODO: SLASH用に合わせる
   min_batch_size: 1
   max_batch_size: 32
-  train_length_path: "tests/data/test_data/train_lengths.txt"
 
   log_epoch: 1
   eval_epoch: 2

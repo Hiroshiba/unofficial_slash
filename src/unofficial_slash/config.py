@@ -13,6 +13,8 @@ class DataFileConfig(BaseModel):
 
     audio_pathlist_path: Path
     pitch_label_pathlist_path: Path | None
+    length_file_path: Path
+    batch_bins: int
     root_dir: Path | None
 
 
@@ -112,12 +114,8 @@ class TrainConfig(BaseModel):
 
     batch_size: int
     eval_batch_size: int
-
-    # 動的バッチング設定
-    batch_bins: int
     min_batch_size: int
     max_batch_size: int
-    train_length_path: Path
 
     log_epoch: int
     eval_epoch: int

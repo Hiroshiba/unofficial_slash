@@ -43,9 +43,7 @@ def preprocess(
 
     if not is_eval:
         rng = numpy.random.default_rng()
-        pitch_shift_bins = rng.integers(
-            -pitch_shift_range, pitch_shift_range + 1
-        )
+        pitch_shift_bins = rng.integers(-pitch_shift_range, pitch_shift_range + 1)
         pitch_shift_semitones = float(pitch_shift_bins)
 
     return OutputData(

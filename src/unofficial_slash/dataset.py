@@ -13,6 +13,7 @@ from torch.utils.data import Dataset as BaseDataset
 
 from unofficial_slash.config import DataFileConfig, DatasetConfig
 from unofficial_slash.data.data import InputData, OutputData, preprocess
+from unofficial_slash.sampler import load_lengths_from_file
 
 
 @dataclass
@@ -52,10 +53,12 @@ class Dataset(BaseDataset[OutputData]):
         self,
         datas: Sequence[LazyInputData],
         config: DatasetConfig,
+        lengths: list[int],
         is_eval: bool,
     ):
         self.datas = datas
         self.config = config
+        self.lengths = lengths
         self.is_eval = is_eval
 
     def __len__(self):
@@ -190,24 +193,36 @@ def create_dataset(config: DatasetConfig) -> DatasetCollection:
     """データセットを作成"""
     # TODO: accent_estimatorのようにHDF5に対応させ、docs/にドキュメントを書く
     datas = get_datas(config.train)
+    lengths = load_lengths_from_file(config.train.length_file_path)
 
     if config.seed is not None:
-        random.Random(config.seed).shuffle(datas)
+        combined = list(zip(datas, lengths, strict=True))
+        random.Random(config.seed).shuffle(combined)
+        datas, lengths = zip(*combined, strict=True)
+        datas, lengths = list(datas), list(lengths)
 
-    tests, trains = datas[: config.test_num], datas[config.test_num :]
+    test_datas, train_datas = datas[: config.test_num], datas[config.test_num :]
+    test_lengths, train_lengths = lengths[: config.test_num], lengths[config.test_num :]
 
-    def _wrapper(datas: list[LazyInputData], is_eval: bool) -> Dataset:
+    def _wrapper(
+        datas: list[LazyInputData], lengths: list[int], is_eval: bool
+    ) -> Dataset:
         if is_eval:
             datas = datas * config.eval_times_num
-        dataset = Dataset(datas=datas, config=config, is_eval=is_eval)
+            lengths = lengths * config.eval_times_num
+        dataset = Dataset(datas=datas, config=config, lengths=lengths, is_eval=is_eval)
         return dataset
 
     return DatasetCollection(
-        train=_wrapper(trains, is_eval=False),
-        test=_wrapper(tests, is_eval=False),
+        train=_wrapper(train_datas, train_lengths, is_eval=False),
+        test=_wrapper(test_datas, test_lengths, is_eval=False),
         eval=None,  # NOTE: 学習データに正解F0がないため、evalデータセットはない
         valid=(
-            _wrapper(get_datas(config.valid), is_eval=True)
+            _wrapper(
+                get_datas(config.valid),
+                load_lengths_from_file(config.valid.length_file_path),
+                is_eval=True,
+            )
             if config.valid is not None
             else None
         ),

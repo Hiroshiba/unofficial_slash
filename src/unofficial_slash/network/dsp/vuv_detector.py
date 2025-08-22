@@ -50,7 +50,7 @@ def voicing_detection(
     v_continuous = Mp_safe / (Mp_safe + Map_safe)  # (B, T)
 
     # 二値のV/UV判定: v = 1 if v' ≥ θ else 0
-    v_binary = (v_continuous >= threshold).float()  # (B, T)
+    v_binary = v_continuous >= threshold  # (B, T)
 
     return v_continuous, v_binary
 

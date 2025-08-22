@@ -7,6 +7,7 @@ import numpy as np
 import scipy.io.wavfile
 import yaml
 
+from scripts.create_length_file import create_length_file
 from unofficial_slash.config import Config
 
 
@@ -20,6 +21,8 @@ def setup_data_and_config(base_config_path: Path, data_dir: Path) -> Config:
 
     config.dataset.train.root_dir = data_dir
     config.dataset.valid.root_dir = data_dir
+    config.dataset.train.length_file_path = data_dir / "train_lengths.txt"
+    config.dataset.valid.length_file_path = data_dir / "valid_lengths.txt"
 
     root_dir = config.dataset.train.root_dir
     train_num, valid_num = 30, 10
@@ -69,7 +72,7 @@ def setup_data_and_config(base_config_path: Path, data_dir: Path) -> Config:
         t = np.linspace(0, duration, num_samples, dtype=np.float32)
 
         # 基本周波数（F0）をランダムに設定
-        f0 = float(np.random.default_rng().uniform(100, 300))
+        f0 = float(np.random.default_rng().uniform(10, 120))
 
         # 正弦波生成
         audio_signal = 0.5 * np.sin(2 * np.pi * f0 * t)
@@ -88,11 +91,41 @@ def setup_data_and_config(base_config_path: Path, data_dir: Path) -> Config:
 
     _setup_data(generate_audio, "audio", "wav")
 
+    # 長さファイル生成（train用）
+    train_pathlist_path = data_dir / "train_audio_pathlist.txt"
+    train_length_file_path = data_dir / "train_lengths.txt"
+    if not train_length_file_path.exists():
+        batch_bins = create_length_file(
+            pathlist_path=train_pathlist_path,
+            root_dir=data_dir,
+            output_path=train_length_file_path,
+            target_batch_size=config.train.batch_size,
+            min_batch_size=config.train.min_batch_size,
+            max_batch_size=config.train.max_batch_size,
+            workers=1,
+        )
+        config.dataset.train.batch_bins = batch_bins
+
+    # 長さファイル生成（valid用）
+    valid_pathlist_path = data_dir / "valid_audio_pathlist.txt"
+    valid_length_file_path = data_dir / "valid_lengths.txt"
+    if not valid_length_file_path.exists():
+        valid_batch_bins = create_length_file(
+            pathlist_path=valid_pathlist_path,
+            root_dir=data_dir,
+            output_path=valid_length_file_path,
+            target_batch_size=config.train.eval_batch_size,
+            min_batch_size=config.train.min_batch_size,
+            max_batch_size=config.train.max_batch_size,
+            workers=1,
+        )
+        config.dataset.valid.batch_bins = valid_batch_bins
+
     # SLASH用ピッチラベル生成
     def generate_pitch_label(file_path: Path) -> None:
         stem = file_path.stem
         duration = audio_lengths[stem]
-        frame_rate = config.dataset.frame_rate
+        frame_rate = config.dataset.sample_rate / config.network.cqt_hop_length
 
         # フレーム数計算
         num_frames = int(duration * frame_rate)

@@ -197,20 +197,26 @@ def reconstruction_loss(
     t_gen_1 = generated_spec_1.shape[1]
     t_gen_2 = generated_spec_2.shape[1]
     t_target = target_spectrogram.shape[1]
+    t_frame_mask = frame_mask.shape[1]
 
     # フレーム数の最大差チェック（1フレーム差は正常、2フレーム以上は異常）
     max_diff = max(
-        abs(t_gen_1 - t_target), abs(t_gen_2 - t_target), abs(t_gen_1 - t_gen_2)
+        abs(t_gen_1 - t_target),
+        abs(t_gen_2 - t_target),
+        abs(t_gen_1 - t_gen_2),
+        abs(t_gen_1 - t_frame_mask),
+        abs(t_gen_2 - t_frame_mask),
+        abs(t_target - t_frame_mask),
     )
-    if max_diff > 1:
+    if max_diff > 2:
         raise ValueError(
             f"Frame count mismatch too large in GED loss: "
-            f"gen1={t_gen_1}, gen2={t_gen_2}, target={t_target} "
-            f"(max_diff={max_diff}). 1フレーム差は正常、2フレーム以上は異常。"
+            f"gen1={t_gen_1}, gen2={t_gen_2}, target={t_target}, frame_mask={t_frame_mask} "
+            f"(max_diff={max_diff}). 2フレーム差まで許容、3フレーム以上は異常。"
         )
 
     # 最小フレーム数に統一
-    min_frames = min(t_gen_1, t_gen_2, t_target)
+    min_frames = min(t_gen_1, t_gen_2, t_target, t_frame_mask)
     generated_spec_1 = generated_spec_1[:, :min_frames, :]
     generated_spec_2 = generated_spec_2[:, :min_frames, :]
     target_spectrogram = target_spectrogram[:, :min_frames, :]

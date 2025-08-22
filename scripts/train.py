@@ -9,11 +9,11 @@ import torch
 import yaml
 from torch.amp.autocast_mode import autocast
 from torch.amp.grad_scaler import GradScaler
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader
 
 from unofficial_slash.batch import collate_dataset_output
-from unofficial_slash.config import Config
-from unofficial_slash.dataset import DatasetType, create_dataset
+from unofficial_slash.config import Config, DataFileConfig
+from unofficial_slash.dataset import Dataset, DatasetType, create_dataset
 from unofficial_slash.evaluator import (
     Evaluator,
     EvaluatorOutput,
@@ -21,8 +21,8 @@ from unofficial_slash.evaluator import (
 )
 from unofficial_slash.generator import Generator
 from unofficial_slash.model import Model, ModelOutput
-from unofficial_slash.network.predictor import Predictor, create_predictor
-from unofficial_slash.sampler import LengthBatchSampler, load_lengths_from_file
+from unofficial_slash.network.predictor import create_predictor
+from unofficial_slash.sampler import LengthBatchSampler
 from unofficial_slash.utility.pytorch_utility import (
     detach_cpu,
     init_weights,
@@ -98,42 +98,25 @@ class TrainingContext:
 
 
 def create_data_loader(
-    config: Config, dataset: Dataset, for_train: bool, for_eval: bool
+    config: Config, data_file_config: DataFileConfig, dataset: Dataset, for_train: bool
 ) -> DataLoader:
     """動的バッチング対応DataLoaderを作成"""
-    if for_train:
-        lengths = load_lengths_from_file(config.train.train_length_path)
-        batch_sampler = LengthBatchSampler(
-            batch_bins=config.train.batch_bins,
-            lengths=lengths,
-            min_batch_size=config.train.min_batch_size,
-            max_batch_size=config.train.max_batch_size,
-            drop_last=True,
-        )
-        return DataLoader(
-            dataset=dataset,
-            batch_sampler=batch_sampler,
-            num_workers=config.train.num_processes,
-            collate_fn=collate_dataset_output,
-            pin_memory=config.train.use_gpu,
-            timeout=0 if config.train.num_processes == 0 else 30,
-            persistent_workers=config.train.num_processes > 0,
-        )
-    else:
-        batch_size = (
-            config.train.eval_batch_size if for_eval else config.train.batch_size
-        )
-        return DataLoader(
-            dataset=dataset,
-            batch_size=batch_size,
-            shuffle=True,
-            num_workers=config.train.num_processes,
-            collate_fn=collate_dataset_output,
-            pin_memory=config.train.use_gpu,
-            drop_last=for_train,
-            timeout=0 if config.train.num_processes == 0 else 30,
-            persistent_workers=config.train.num_processes > 0,
-        )
+    batch_sampler = LengthBatchSampler(
+        batch_bins=data_file_config.batch_bins,
+        lengths=dataset.lengths,
+        min_batch_size=config.train.min_batch_size,
+        max_batch_size=config.train.max_batch_size,
+        drop_last=for_train,
+    )
+    return DataLoader(
+        dataset=dataset,
+        batch_sampler=batch_sampler,
+        num_workers=config.train.num_processes,
+        collate_fn=collate_dataset_output,
+        pin_memory=config.train.use_gpu,
+        timeout=0 if config.train.num_processes == 0 else 30,
+        persistent_workers=config.train.num_processes > 0,
+    )
 
 
 def setup_training_context(config_yaml_path: Path, output_dir: Path) -> TrainingContext:
@@ -150,19 +133,21 @@ def setup_training_context(config_yaml_path: Path, output_dir: Path) -> Training
 
     # data loader
     train_loader = create_data_loader(
-        config, datasets.train, for_train=True, for_eval=False
+        config, config.dataset.train, datasets.train, for_train=True
     )
     test_loader = create_data_loader(
-        config, datasets.test, for_train=False, for_eval=False
+        config, config.dataset.train, datasets.test, for_train=False
     )
     eval_loader = (
-        create_data_loader(config, datasets.eval, for_train=False, for_eval=True)
+        create_data_loader(config, config.dataset.train, datasets.eval, for_train=False)
         if datasets.eval is not None
         else None
     )
     valid_loader = (
-        create_data_loader(config, datasets.valid, for_train=False, for_eval=True)
-        if datasets.valid is not None
+        create_data_loader(
+            config, config.dataset.valid, datasets.valid, for_train=False
+        )
+        if datasets.valid is not None and config.dataset.valid is not None
         else None
     )
 
