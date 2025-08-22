@@ -52,7 +52,10 @@ def pitch_consistency_loss(
 ) -> Tensor:
     """Pitch Consistency Loss (L_cons) - SLASH論文 Equation (1)"""
     min_frames = validate_frame_alignment(
-        f0_original.shape[1], frame_mask.shape[1], "pitch_consistency_loss", 1
+        f0_original.shape[1],
+        frame_mask.shape[1],
+        name="pitch_consistency_loss",
+        max_diff=2,
     )
 
     f0_original_aligned = f0_original[:, :min_frames]
@@ -88,7 +91,10 @@ def pitch_guide_loss(
 ) -> Tensor:
     """Pitch Guide Loss (L_guide) - SLASH論文 Equation (3)"""
     min_frames = validate_frame_alignment(
-        f0_logits.shape[1], frame_mask.shape[1], "pitch_guide_loss", 1
+        f0_logits.shape[1],
+        frame_mask.shape[1],
+        name="pitch_guide_loss",
+        max_diff=2,
     )
 
     f0_logits_aligned = f0_logits[:, :min_frames, :]
@@ -117,7 +123,10 @@ def pitch_guide_shift_loss(
 ) -> Tensor:
     """Pitch Guide Shift Loss (L_g-shift) - SLASH論文 Section 2.3"""
     min_frames = validate_frame_alignment(
-        f0_logits_shifted.shape[1], frame_mask.shape[1], "pitch_guide_shift_loss", 1
+        f0_logits_shifted.shape[1],
+        frame_mask.shape[1],
+        name="pitch_guide_shift_loss",
+        max_diff=2,
     )
 
     f0_logits_shifted_aligned = f0_logits_shifted[:, :min_frames, :]
@@ -155,12 +164,14 @@ def pseudo_spectrogram_loss(
     # L1ノルム: ||ψ(S*) - ψ(S)||₁
     l1_diff = torch.abs(psi_pseudo - psi_target)  # (B, T, K)
 
-    t_pseudo = pseudo_spectrogram.shape[1]
-    t_target = target_spectrogram.shape[1]
-    t_vuv = vuv_mask.shape[1]
-    t_frame = frame_mask.shape[1]
-
-    min_frames = min(t_pseudo, t_target, t_vuv, t_frame)
+    min_frames = validate_frame_alignment(
+        pseudo_spectrogram.shape[1],
+        target_spectrogram.shape[1],
+        vuv_mask.shape[1],
+        frame_mask.shape[1],
+        name="pseudo_spectrogram_loss",
+        max_diff=2,
+    )
 
     pseudo_aligned = pseudo_spectrogram[:, :min_frames, :]
     target_aligned = target_spectrogram[:, :min_frames, :]
@@ -194,29 +205,14 @@ def reconstruction_loss(
 ) -> Tensor:
     """Reconstruction Loss (L_recon) - SLASH論文 Equation (8) GED"""
     # 時間軸統一処理（DifferentiableWorldとSTFTのフレーム数不一致対応）
-    t_gen_1 = generated_spec_1.shape[1]
-    t_gen_2 = generated_spec_2.shape[1]
-    t_target = target_spectrogram.shape[1]
-    t_frame_mask = frame_mask.shape[1]
-
-    # フレーム数の最大差チェック（1フレーム差は正常、2フレーム以上は異常）
-    max_diff = max(
-        abs(t_gen_1 - t_target),
-        abs(t_gen_2 - t_target),
-        abs(t_gen_1 - t_gen_2),
-        abs(t_gen_1 - t_frame_mask),
-        abs(t_gen_2 - t_frame_mask),
-        abs(t_target - t_frame_mask),
+    min_frames = validate_frame_alignment(
+        generated_spec_1.shape[1],
+        generated_spec_2.shape[1],
+        target_spectrogram.shape[1],
+        frame_mask.shape[1],
+        name="reconstruction_loss_GED",
+        max_diff=2,
     )
-    if max_diff > 2:
-        raise ValueError(
-            f"Frame count mismatch too large in GED loss: "
-            f"gen1={t_gen_1}, gen2={t_gen_2}, target={t_target}, frame_mask={t_frame_mask} "
-            f"(max_diff={max_diff}). 2フレーム差まで許容、3フレーム以上は異常。"
-        )
-
-    # 最小フレーム数に統一
-    min_frames = min(t_gen_1, t_gen_2, t_target, t_frame_mask)
     generated_spec_1 = generated_spec_1[:, :min_frames, :]
     generated_spec_2 = generated_spec_2[:, :min_frames, :]
     target_spectrogram = target_spectrogram[:, :min_frames, :]
@@ -400,15 +396,13 @@ class Model(nn.Module):
         )
         target_spectrogram = torch.abs(stft_result).transpose(-1, -2)  # (B, T, K)
 
-        # CQT-STFTフレーム数差チェック（1フレーム差は技術的制約として正常）
-        frame_diff_cqt_stft = abs(target_spectrogram.shape[1] - f0_values.shape[1])
-        if frame_diff_cqt_stft > 1:
-            raise ValueError(
-                f"CQT-STFT frame count mismatch too large: "
-                f"CQT={f0_values.shape[1]}, STFT={target_spectrogram.shape[1]} "
-                f"(diff={frame_diff_cqt_stft}). "
-                f"1フレーム差は正常、2フレーム以上は設定確認が必要。"
-            )
+        # CQT-STFTフレーム数差チェック
+        validate_frame_alignment(
+            f0_values.shape[1],
+            target_spectrogram.shape[1],
+            name="CQT_STFT_alignment",
+            max_diff=2,
+        )
 
         # スペクトル包絡推定（Pseudo Spectrogram生成前に計算）
         freq_bins = target_spectrogram.shape[-1]
@@ -446,17 +440,13 @@ class Model(nn.Module):
             aperiodicity=aperiodicity,
         )
 
-        # 時間軸統一処理（CQTとSTFTの1フレーム差は技術的制約として正常）
-        t_f0 = f0_values.shape[1]
-        t_aperiodicity = aperiodicity.shape[1]
-        frame_diff = abs(t_f0 - t_aperiodicity)
-
-        if frame_diff > 1:
-            raise ValueError(
-                f"Frame count mismatch too large: f0_values={t_f0}, aperiodicity={t_aperiodicity} "
-                f"(diff={frame_diff}). "
-                f"1フレーム差は正常（nnAudio CQTとtorch.stftの実装方式差）、2フレーム以上は異常。"
-            )
+        # 時間軸統一処理
+        validate_frame_alignment(
+            f0_values.shape[1],
+            aperiodicity.shape[1],
+            name="f0_aperiodicity_alignment",
+            max_diff=2,
+        )
 
         loss_pseudo = pseudo_spectrogram_loss(
             pseudo_spectrogram=pseudo_spectrogram,
@@ -503,7 +493,7 @@ class Model(nn.Module):
         f0_logits_aug, f0_values_aug, bap_aug = self.predictor(audio_aug_volume)
 
         min_frames_aug = validate_frame_alignment(
-            f0_values.shape[1], frame_mask.shape[1], "L_aug_loss", 1
+            f0_values.shape[1], frame_mask.shape[1], name="L_aug_loss", max_diff=2
         )
 
         f0_values_aligned = f0_values[:, :min_frames_aug]
@@ -541,7 +531,10 @@ class Model(nn.Module):
         bap_upsampled_aug, _ = interpolate_bap_log_space(bap_aug, freq_bins)
 
         min_frames_ap = validate_frame_alignment(
-            bap_upsampled_original.shape[1], frame_mask.shape[1], "L_ap_loss", 1
+            bap_upsampled_original.shape[1],
+            frame_mask.shape[1],
+            name="L_ap_loss",
+            max_diff=2,
         )
 
         bap_original_aligned = bap_upsampled_original[:, :min_frames_ap, :]

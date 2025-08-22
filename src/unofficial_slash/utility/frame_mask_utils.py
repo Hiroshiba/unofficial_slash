@@ -22,20 +22,24 @@ def audio_mask_to_frame_mask(
     return (idx.unsqueeze(0) < valid_frames.unsqueeze(1)).to(torch.bool)
 
 
-def validate_frame_alignment(
-    tensor_frames: int,
-    mask_frames: int,
-    tensor_name: str,
-    max_frame_diff: int,
-) -> int:
+def validate_frame_alignment(*frame_counts: int, name: str, max_diff: int) -> int:
     """フレーム数の整合性を検証し、安全な最小フレーム数を返す"""
-    frame_diff = abs(tensor_frames - mask_frames)
+    # TODO: 許容できるフレーム数の誤差を減らしたい
+    if len(frame_counts) < 2:
+        raise ValueError(f"At least 2 frame counts required, got {len(frame_counts)}")
 
-    if frame_diff > max_frame_diff:
+    min_frames = min(frame_counts)
+    max_frames = max(frame_counts)
+    max_diff = max_frames - min_frames
+
+    if max_diff > max_diff:
+        frame_counts_str = ", ".join(
+            f"{i}={count}" for i, count in enumerate(frame_counts)
+        )
         raise ValueError(
-            f"Frame count mismatch too large for {tensor_name}: "
-            f"tensor={tensor_frames}, mask={mask_frames} "
-            f"(diff={frame_diff}, max_allowed={max_frame_diff})"
+            f"Frame count mismatch too large for {name}: "
+            f"[{frame_counts_str}] "
+            f"(max_diff={max_diff}, max_allowed={max_diff}). "
         )
 
-    return min(tensor_frames, mask_frames)
+    return min_frames

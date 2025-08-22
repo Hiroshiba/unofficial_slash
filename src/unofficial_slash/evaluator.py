@@ -38,10 +38,11 @@ def raw_pitch_accuracy(
 ) -> tuple[Tensor, Tensor]:
     """Raw Pitch Accuracy (RPA) - SLASH論文評価指標"""
     min_frames = validate_frame_alignment(
-        predicted_f0.shape[1], target_f0.shape[1], "raw_pitch_accuracy_pred_target", 1
-    )
-    min_frames = validate_frame_alignment(
-        min_frames, frame_mask.shape[1], "raw_pitch_accuracy_frame_mask", 1
+        predicted_f0.shape[1],
+        target_f0.shape[1],
+        frame_mask.shape[1],
+        name="raw_pitch_accuracy",
+        max_diff=2,
     )
 
     predicted_f0_aligned = predicted_f0[:, :min_frames]
@@ -90,10 +91,11 @@ def log_f0_rmse(
 ) -> Tensor:
     """log-F0 RMSE - SLASH論文評価指標"""
     min_frames = validate_frame_alignment(
-        predicted_f0.shape[1], target_f0.shape[1], "log_f0_rmse_pred_target", 1
-    )
-    min_frames = validate_frame_alignment(
-        min_frames, frame_mask.shape[1], "log_f0_rmse_frame_mask", 1
+        predicted_f0.shape[1],
+        target_f0.shape[1],
+        frame_mask.shape[1],
+        name="log_f0_rmse",
+        max_diff=2,
     )
 
     predicted_f0_aligned = predicted_f0[:, :min_frames]
