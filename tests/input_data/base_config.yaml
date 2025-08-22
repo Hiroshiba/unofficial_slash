@@ -21,6 +21,7 @@ dataset:
 
 network:
   sample_rate: 24000
+  frame_length: 120
 
   # Pitch Encoder
   f0_bins: 64 # NOTE: テスト用に縮小、論文では1024
@@ -34,7 +35,6 @@ network:
   # CQT
   cqt_bins: 49 # NOTE: テスト用に縮小、論文では176
   cqt_total_bins: 205
-  cqt_hop_length: 120
   cqt_bins_per_octave: 24
   cqt_fmin: 32.70
   cqt_filter_scale: 0.5
@@ -49,7 +49,6 @@ network:
   # Pseudo Spectrogram Generator
   pseudo_spec_epsilon: 0.001
   pseudo_spec_n_fft: 1024
-  pseudo_spec_hop_length: 120
 
   # V/UV Detector
   vuv_detector_eps: 1e-8

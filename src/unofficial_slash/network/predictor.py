@@ -81,11 +81,12 @@ class Predictor(nn.Module):
     ):
         super().__init__()
         self.network_config = network_config
+        hop_length = network_config.frame_length
 
         # GPU対応CQT変換器（nnAudio）
         self.cqt_transform = CQT(
             sr=sample_rate,
-            hop_length=network_config.cqt_hop_length,
+            hop_length=hop_length,
             fmin=network_config.cqt_fmin,
             n_bins=network_config.cqt_total_bins,
             bins_per_octave=network_config.cqt_bins_per_octave,
@@ -113,7 +114,7 @@ class Predictor(nn.Module):
         # Pitch Guide Generator初期化
         self.pitch_guide_generator = PitchGuideGenerator(
             sample_rate=sample_rate,
-            hop_length=network_config.cqt_hop_length,
+            hop_length=hop_length,
             n_fft=network_config.pitch_guide_n_fft,
             window_size=network_config.pitch_guide_window_size,
             shs_n_max=network_config.pitch_guide_shs_n_max,
@@ -128,14 +129,14 @@ class Predictor(nn.Module):
             n_freq_bins=network_config.pseudo_spec_n_fft // 2 + 1,
             epsilon=network_config.pseudo_spec_epsilon,
             n_fft=network_config.pseudo_spec_n_fft,
-            hop_length=network_config.pseudo_spec_hop_length,
+            hop_length=hop_length,
         )
 
         # Differentiable World Synthesizer初期化
         self.world_synthesizer = DifferentiableWorld(
             sample_rate=sample_rate,
             n_fft=network_config.pseudo_spec_n_fft,
-            hop_length=network_config.pseudo_spec_hop_length,
+            hop_length=hop_length,
         )
 
         # V/UV Detector初期化

@@ -103,6 +103,7 @@ def setup_data_and_config(base_config_path: Path, data_dir: Path) -> Config:
             min_batch_size=config.train.min_batch_size,
             max_batch_size=config.train.max_batch_size,
             workers=1,
+            frame_length=config.network.frame_length,
         )
         config.dataset.train.batch_bins = batch_bins
 
@@ -118,6 +119,7 @@ def setup_data_and_config(base_config_path: Path, data_dir: Path) -> Config:
             min_batch_size=config.train.min_batch_size,
             max_batch_size=config.train.max_batch_size,
             workers=1,
+            frame_length=config.network.frame_length,
         )
         config.dataset.valid.batch_bins = valid_batch_bins
 
@@ -125,10 +127,10 @@ def setup_data_and_config(base_config_path: Path, data_dir: Path) -> Config:
     def generate_pitch_label(file_path: Path) -> None:
         stem = file_path.stem
         duration = audio_lengths[stem]
-        frame_rate = config.dataset.sample_rate / config.network.cqt_hop_length
-
         # フレーム数計算
-        num_frames = int(duration * frame_rate)
+        num_frames = int(
+            duration * config.dataset.sample_rate / config.network.frame_length
+        )
 
         # F0値生成（80-400Hzの範囲）
         base_f0 = float(np.random.default_rng().uniform(100, 300))

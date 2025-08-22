@@ -37,6 +37,7 @@ class NetworkConfig(BaseModel):
 
     # 基本設定
     sample_rate: int
+    frame_length: int
 
     # Pitch Encoder 設定
     f0_bins: int
@@ -52,7 +53,6 @@ class NetworkConfig(BaseModel):
     # CQT 設定
     cqt_bins: int
     cqt_total_bins: int
-    cqt_hop_length: int
     cqt_bins_per_octave: int
     cqt_fmin: float
     cqt_filter_scale: float
@@ -67,7 +67,6 @@ class NetworkConfig(BaseModel):
     # Pseudo Spectrogram Generator 設定
     pseudo_spec_epsilon: float
     pseudo_spec_n_fft: int
-    pseudo_spec_hop_length: int
 
     # V/UV Detector 設定
     vuv_detector_eps: float

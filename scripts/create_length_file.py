@@ -1,27 +1,27 @@
 """動的バッチング用音声長ファイル作成スクリプト"""
 
 import argparse
+from functools import partial
 from multiprocessing import Pool
 from pathlib import Path
 
-import librosa
+import torchaudio
 from tqdm import tqdm
 
 from unofficial_slash.sampler import LengthBatchSampler
 
 
-def _calculate_single_audio_length(audio_path: Path) -> int:
+def _calculate_single_audio_length(audio_path: Path, frame_length: int) -> int:
     """単一音声ファイルの長さを計算"""
     if not audio_path.exists():
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
-    duration = librosa.get_duration(path=audio_path)
-    frame_length = int(duration * 1000 / 5)
-    return frame_length
+    total_samples = torchaudio.info(audio_path).num_frames
+    return total_samples // frame_length
 
 
 def _calculate_audio_lengths(
-    pathlist_path: Path, root_dir: Path, workers: int
+    pathlist_path: Path, root_dir: Path, workers: int, frame_length: int
 ) -> list[int]:
     """パスリストファイルから各音声ファイルの長さを並列計算"""
     if not pathlist_path.exists():
@@ -31,10 +31,11 @@ def _calculate_audio_lengths(
     for line in pathlist_path.read_text().strip().split("\n"):
         audio_paths.append(root_dir / line)
 
+    process = partial(_calculate_single_audio_length, frame_length=frame_length)
     with Pool(processes=workers) as pool:
         lengths = list(
             tqdm(
-                pool.imap(_calculate_single_audio_length, audio_paths),
+                pool.imap(process, audio_paths),
                 total=len(audio_paths),
                 desc="音声ファイル長さ計算中",
             )
@@ -44,11 +45,18 @@ def _calculate_audio_lengths(
 
 
 def _create_length_file_from_pathlist(
-    pathlist_path: Path, root_dir: Path, output_path: Path, workers: int
+    pathlist_path: Path,
+    root_dir: Path,
+    output_path: Path,
+    workers: int,
+    frame_length: int,
 ) -> list[int]:
     """パスリストファイルから音声長ファイルを作成し、長さリストを返す"""
     lengths = _calculate_audio_lengths(
-        pathlist_path=pathlist_path, root_dir=root_dir, workers=workers
+        pathlist_path=pathlist_path,
+        root_dir=root_dir,
+        workers=workers,
+        frame_length=frame_length,
     )
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -114,6 +122,7 @@ def create_length_file(
     min_batch_size: int,
     max_batch_size: int,
     workers: int,
+    frame_length: int,
 ) -> int:
     """音声長ファイル作成と平均バッチサイズに対するbatch_bins値の計算"""
     lengths = _create_length_file_from_pathlist(
@@ -121,6 +130,7 @@ def create_length_file(
         root_dir=root_dir,
         output_path=output_path,
         workers=workers,
+        frame_length=frame_length,
     )
 
     batch_bins = _calculate_batch_bins_for_target_batch_size(
@@ -143,6 +153,7 @@ def main():
     parser.add_argument("--min-batch-size", type=int, default=1)
     parser.add_argument("--max-batch-size", type=int, default=32)
     parser.add_argument("--workers", type=int, default=64)
+    parser.add_argument("--frame-length", type=int, default=120)
     batch_bins = create_length_file(**vars(parser.parse_args()))
     print(f"推奨batch_bins値: {batch_bins}")
 

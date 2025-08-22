@@ -149,7 +149,7 @@ class Evaluator(nn.Module):
         config = self.generator.predictor.network_config
         frame_mask = audio_mask_to_frame_mask(
             batch.attention_mask,
-            hop_length=config.cqt_hop_length,
+            hop_length=config.frame_length,
         )
 
         rpa_50c, voiced_frames = raw_pitch_accuracy(

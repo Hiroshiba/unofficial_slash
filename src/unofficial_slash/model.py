@@ -341,7 +341,7 @@ class Model(nn.Module):
         # フレーム単位マスクを事前作成
         frame_mask = audio_mask_to_frame_mask(
             batch.attention_mask,
-            hop_length=config.cqt_hop_length,
+            hop_length=config.frame_length,
         )
 
         # forward_with_shift()を常に使用（学習専用の統一フロー）
@@ -389,7 +389,7 @@ class Model(nn.Module):
         # Pseudo Spectrogram Loss (L_pseudo)
         # STFTでターゲットスペクトログラムを取得
         n_fft = self.predictor.network_config.pseudo_spec_n_fft
-        hop_length = self.predictor.network_config.pseudo_spec_hop_length
+        hop_length = self.predictor.network_config.frame_length
 
         stft_result = torch.stft(
             batch.audio,

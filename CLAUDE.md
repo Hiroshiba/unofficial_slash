@@ -8,8 +8,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### 優先度の高い残存タスク
 
-- cqt_hop_lengthとpseudo_spec_hop_lengthをなくしてframe_rateにする
-
 - 部分部分でtorch compileしていく
   - 全体でコンパイルするのはCQTがあるため不可能
 
