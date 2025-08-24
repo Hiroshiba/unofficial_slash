@@ -37,6 +37,10 @@ class DifferentiableWorld(nn.Module):
         self.aperiodic_wav_vol = aperiodic_wav_vol
         self.dc_remove = dc_remove
 
+        assert self.n_fft >= self.synth_hop_length, (
+            f"n_fft ({self.n_fft}) must be >= synth_hop_length ({self.synth_hop_length}) to avoid negative padding"
+        )
+
     def forward(
         self,
         f0_hz,  # (B, T)
@@ -49,6 +53,7 @@ class DifferentiableWorld(nn.Module):
         Note:
             When using the synthesis process by DSS, determine the lower limit
             of F0 or convert to continuous F0. If F0 = 0[Hz], it will not work well.
+            NOTE: 追実装上、f0=0は来えない。
 
             It is based on World's synthesis process but is not a perfect reproduction.
             The main differences are summarized below.

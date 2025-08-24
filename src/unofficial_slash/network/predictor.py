@@ -92,7 +92,8 @@ class Predictor(nn.Module):
             fmin=network_config.cqt_fmin,
             n_bins=network_config.cqt_total_bins,
             bins_per_octave=network_config.cqt_bins_per_octave,
-            filter_scale=network_config.cqt_filter_scale,
+            filter_scale=network_config.cqt_filter_scale,  # type: ignore float想定なのにintになってしまっている
+            center=True,
             trainable=False,
         )
 

@@ -31,7 +31,7 @@ def lag_window_spectral_envelope(
 
         # Lag-window適用: 高次ケプストラム係数をゼロにする
         windowed_cepstrum = cepstrum.clone()
-        windowed_cepstrum[:, window_size:-window_size] = 0
+        windowed_cepstrum[:, window_size:-window_size] = 0  # NOTE: 矩形窓。論文で不明記
 
         # FFTでスペクトル包絡を復元
         envelope_symmetric = torch.fft.rfft(windowed_cepstrum, n=fft_size, dim=-1)

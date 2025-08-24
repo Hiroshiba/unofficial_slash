@@ -78,7 +78,6 @@ class PseudoSpectrogramGenerator(nn.Module):
         self.epsilon = epsilon
         self.n_fft = n_fft
         self.hop_length = hop_length
-        self.frame_length = hop_length * 4
 
     def forward(
         self,

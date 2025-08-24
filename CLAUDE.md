@@ -10,6 +10,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 - コードをAIにチェックしてもらう
 
+- STFTやCQTのフレーミングを合わせる
+  - 現状どうなっているかを洗い出す（centerや端の処理など）
+  - どうするのが妥当か考える
+
 ### 主要な特徴
 - 相対的なピッチ差学習（ピッチシフト利用）
 - DSP 由来の絶対ピッチ情報を活用
