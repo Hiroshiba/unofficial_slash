@@ -1,7 +1,6 @@
 """check_dataset.pyのテスト"""
 
 from pathlib import Path
-from unittest.mock import patch
 
 import pytest
 import yaml
@@ -36,6 +35,5 @@ def test_check_dataset_with_missing_data_files(
     with config_path.open("w") as f:
         yaml.dump(config_dict, f)
 
-    with patch("builtins.breakpoint"):  # NOTE: breakpointをモック化
-        with pytest.raises(FileNotFoundError):
-            check_dataset(config_path, trials=1)
+    with pytest.raises(FileNotFoundError):
+        check_dataset(config_path, trials=1)

@@ -3,22 +3,27 @@
 from pathlib import Path
 from typing import Any, Self
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from unofficial_slash.utility.git_utility import get_branch_name, get_commit_id
+from unofficial_slash.utility.type_utility import UPathField
 
 
-class DataFileConfig(BaseModel):
+class _Model(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+
+class DataFileConfig(_Model):
     """SLASH 音声データファイルの設定"""
 
-    audio_pathlist_path: Path
-    pitch_label_pathlist_path: Path | None
-    length_file_path: Path
+    audio_pathlist_path: UPathField
+    pitch_label_pathlist_path: UPathField | None
+    length_file_path: UPathField
     batch_bins: int
-    root_dir: Path | None
+    root_dir: UPathField | None
 
 
-class DatasetConfig(BaseModel):
+class DatasetConfig(_Model):
     """SLASH データセット全体の設定"""
 
     train: DataFileConfig
@@ -32,7 +37,7 @@ class DatasetConfig(BaseModel):
     pitch_shift_range: int
 
 
-class NetworkConfig(BaseModel):
+class NetworkConfig(_Model):
     """SLASH Pitch Encoder ネットワークの設定"""
 
     # 基本設定
@@ -73,7 +78,7 @@ class NetworkConfig(BaseModel):
     vuv_threshold: float
 
 
-class ModelConfig(BaseModel):
+class ModelConfig(_Model):
     """SLASH 損失関数の設定"""
 
     # 基本損失重み
@@ -108,7 +113,7 @@ class ModelConfig(BaseModel):
     volume_change_db_range: float
 
 
-class TrainConfig(BaseModel):
+class TrainConfig(_Model):
     """学習の設定"""
 
     batch_size: int
@@ -130,7 +135,7 @@ class TrainConfig(BaseModel):
     use_amp: bool = True
 
 
-class ProjectConfig(BaseModel):
+class ProjectConfig(_Model):
     """プロジェクトの設定"""
 
     name: str
@@ -138,7 +143,7 @@ class ProjectConfig(BaseModel):
     category: str | None = None
 
 
-class Config(BaseModel):
+class Config(_Model):
     """機械学習の全設定"""
 
     dataset: DatasetConfig

@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 import pytest
+from upath import UPath
 
 from tests.test_utils import setup_data_and_config
 from unofficial_slash.config import Config
@@ -34,7 +35,7 @@ def base_config_path(input_data_dir: Path) -> Path:
 
 
 @pytest.fixture(scope="session", autouse=True)
-def data_and_config(base_config_path: Path, output_data_dir: Path) -> Config:
+def data_and_config(base_config_path: Path, output_data_dir: UPath) -> Config:
     """データディレクトリと学習テスト用の設定のセットアップ"""
     data_dir = output_data_dir / "train_data"
     return setup_data_and_config(base_config_path, data_dir)

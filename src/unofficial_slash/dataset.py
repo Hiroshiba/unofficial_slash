@@ -7,26 +7,41 @@ from enum import Enum
 from pathlib import Path
 from typing import assert_never
 
+import fsspec
 import numpy
 import torchaudio
+from fsspec.implementations.local import LocalFileSystem
 from torch.utils.data import Dataset as BaseDataset
+from upath import UPath
 
 from unofficial_slash.config import DataFileConfig, DatasetConfig
 from unofficial_slash.data.data import InputData, OutputData, preprocess
 from unofficial_slash.sampler import load_lengths_from_file
 
 
+def _to_local_path(p: UPath) -> Path:
+    """リモートならキャッシュを作ってそのパスを、ローカルならそのままそのパスを返す"""
+    if isinstance(p.fs, LocalFileSystem):
+        return Path(p)
+    obj = fsspec.open_local(
+        "simplecache::" + str(p), simplecache={"cache_storage": "./hiho_cache/"}
+    )
+    if isinstance(obj, list):
+        raise ValueError(f"複数のローカルパスが返されました: {p} -> {obj}")
+    return Path(obj)
+
+
 @dataclass
 class LazyInputData:
     """遅延読み込み対応の入力データ構造"""
 
-    audio_path: Path
-    pitch_label_path: Path | None
+    audio_path: UPath
+    pitch_label_path: UPath | None
 
     def generate(self, *, sample_rate: int) -> InputData:
         """ファイルからデータを読み込んでInputDataを生成"""
         # 音声ファイル読み込み
-        audio, sr = torchaudio.load(self.audio_path)
+        audio, sr = torchaudio.load(_to_local_path(self.audio_path))
         assert sr == sample_rate, f"Expected sample rate {sample_rate}, but got {sr}"
 
         # モノラル変換（ステレオの場合は左チャンネルのみ使用）
@@ -36,13 +51,13 @@ class LazyInputData:
         # ピッチラベル読み込み（オプション）
         pitch_data = None
         if self.pitch_label_path is not None:
-            pitch_data = numpy.loadtxt(self.pitch_label_path)
+            pitch_data = numpy.loadtxt(_to_local_path(self.pitch_label_path))
 
         return InputData(
             audio=audio.squeeze(0).numpy(),  # (T,) 音声波形
-            pitch_label=pitch_data.astype(numpy.float32)
-            if pitch_data is not None
-            else None,  # (T,) ピッチラベル
+            pitch_label=(
+                pitch_data.astype(numpy.float32) if pitch_data is not None else None
+            ),  # (T,) ピッチラベル
         )
 
 
@@ -122,25 +137,25 @@ class DatasetCollection:
                 assert_never(type)
 
 
-PathMap = dict[str, Path]
+PathMap = dict[str, UPath]
 """パスマップ。stemをキー、パスを値とする辞書型"""
 
 
-def _load_pathlist(pathlist_path: Path, root_dir: Path) -> PathMap:
+def _load_pathlist(pathlist_path: UPath, root_dir: UPath) -> PathMap:
     """pathlistファイルを読み込みんでパスマップを返す。"""
     path_list = [root_dir / p for p in pathlist_path.read_text().splitlines()]
     return {p.stem: p for p in path_list}
 
 
 def get_data_paths(
-    root_dir: Path | None, pathlist_paths: list[Path]
+    root_dir: UPath | None, pathlist_paths: list[UPath]
 ) -> tuple[list[str], list[PathMap]]:
     """複数のpathlistファイルからstemリストとパスマップを返す。整合性も確認する。"""
     if len(pathlist_paths) == 0:
         raise ValueError("少なくとも1つのpathlist設定が必要です")
 
     if root_dir is None:
-        root_dir = Path(".")
+        root_dir = UPath(".")
 
     path_mappings: list[PathMap] = []
 

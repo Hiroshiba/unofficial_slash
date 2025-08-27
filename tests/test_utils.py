@@ -6,12 +6,13 @@ from pathlib import Path
 import numpy as np
 import scipy.io.wavfile
 import yaml
+from upath import UPath
 
 from scripts.create_length_file import create_length_file
 from unofficial_slash.config import Config
 
 
-def setup_data_and_config(base_config_path: Path, data_dir: Path) -> Config:
+def setup_data_and_config(base_config_path: Path, data_dir: UPath) -> Config:
     """テストデータをセットアップし、設定を作る"""
     with base_config_path.open() as f:
         config_dict = yaml.safe_load(f)
