@@ -130,7 +130,8 @@ class TrainConfig(_Model):
     scheduler: dict[str, Any] | None = None
     weight_initializer: str | None = None
     pretrained_predictor_path: Path | None = None
-    num_processes: int = 0
+    prefetch_workers: int = 256
+    preprocess_workers: int = 0
     use_gpu: bool = True
     use_amp: bool = True
 

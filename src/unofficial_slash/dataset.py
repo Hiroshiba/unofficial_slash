@@ -1,7 +1,7 @@
 """データセットモジュール"""
 
 import random
-from collections.abc import Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
@@ -38,7 +38,7 @@ class LazyInputData:
     audio_path: UPath
     pitch_label_path: UPath | None
 
-    def generate(self, *, sample_rate: int) -> InputData:
+    def fetch(self, *, sample_rate: int) -> InputData:
         """ファイルからデータを読み込んでInputDataを生成"""
         # 音声ファイル読み込み
         audio, sr = torchaudio.load(_to_local_path(self.audio_path))
@@ -61,12 +61,24 @@ class LazyInputData:
         )
 
 
+def prefetch_datas(
+    datas: list[LazyInputData], num_prefetch: int, sample_rate: int
+) -> None:
+    """データセットを前もって読み込む"""
+    if num_prefetch <= 0:
+        return
+
+    with ThreadPoolExecutor(max_workers=num_prefetch) as executor:
+        for data in datas:
+            executor.submit(data.fetch, sample_rate=sample_rate)
+
+
 class Dataset(BaseDataset[OutputData]):
     """メインのデータセット"""
 
     def __init__(
         self,
-        datas: Sequence[LazyInputData],
+        datas: list[LazyInputData],
         config: DatasetConfig,
         lengths: list[int],
         is_eval: bool,
@@ -82,15 +94,16 @@ class Dataset(BaseDataset[OutputData]):
 
     def __getitem__(self, i: int) -> OutputData:
         """指定されたインデックスのデータを前処理して返す"""
-        data = self.datas[i]
-        if isinstance(data, LazyInputData):
-            data = data.generate(sample_rate=self.config.sample_rate)
-
-        return preprocess(
-            data,
-            is_eval=self.is_eval,
-            pitch_shift_range=self.config.pitch_shift_range,
-        )
+        try:
+            return preprocess(
+                self.datas[i].fetch(sample_rate=self.config.sample_rate),
+                is_eval=self.is_eval,
+                pitch_shift_range=self.config.pitch_shift_range,
+            )
+        except Exception as e:
+            raise RuntimeError(
+                f"データ処理に失敗しました: index={i} data={self.datas[i]}"
+            ) from e
 
 
 class DatasetType(str, Enum):

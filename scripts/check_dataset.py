@@ -22,7 +22,7 @@ def check_dataset(config_yaml_path: Path, trials: int) -> None:
 
     config = Config.from_dict(config_dict)
 
-    num_processes = config.train.num_processes
+    preprocess_workers = config.train.preprocess_workers
     batch_size = config.train.batch_size
     pin_memory = config.train.use_gpu
 
@@ -30,7 +30,7 @@ def check_dataset(config_yaml_path: Path, trials: int) -> None:
 
     wrapper = partial(
         _check,
-        num_processes=num_processes,
+        preprocess_workers=preprocess_workers,
         batch_size=batch_size,
         pin_memory=pin_memory,
     )
@@ -47,14 +47,14 @@ def check_dataset(config_yaml_path: Path, trials: int) -> None:
 def _check(
     dataset,
     desc: str,
-    num_processes: int | None,
+    preprocess_workers: int | None,
     batch_size: int,
     pin_memory: bool,
     drop_last: bool,
 ) -> None:
     wrapper = partial(_wrapper, dataset=dataset)
 
-    pool_processes = None if num_processes == 0 else num_processes
+    pool_processes = None if preprocess_workers == 0 else preprocess_workers
     with multiprocessing.Pool(processes=pool_processes) as pool:
         it = pool.imap_unordered(wrapper, range(len(dataset)), chunksize=2**8)
         for i, error in tqdm(it, desc=desc, total=len(dataset)):
@@ -68,11 +68,11 @@ def _check(
         dataset=dataset,
         batch_size=batch_size,
         shuffle=True,
-        num_workers=num_processes if num_processes is not None else 0,
+        num_workers=preprocess_workers if preprocess_workers is not None else 0,
         collate_fn=collate_dataset_output,
         pin_memory=pin_memory,
         drop_last=drop_last,
-        timeout=0 if num_processes == 0 else 15,
+        timeout=0 if preprocess_workers == 0 else 15,
     )
     for _, _ in tqdm(enumerate(it), desc=desc, total=len(dataset) // batch_size):
         pass

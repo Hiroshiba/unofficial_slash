@@ -101,7 +101,8 @@ train:
     name: "adamw"
     lr: 0.0002
   scheduler: { "name": "warmup", "warmup_steps": 10 }
-  num_processes: 0
+  prefetch_workers: 256
+  preprocess_workers: 0
   use_gpu: false
   use_amp: false
 
