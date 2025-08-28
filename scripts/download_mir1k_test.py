@@ -3,10 +3,11 @@
 MIR-1K テスト用データセットダウンロードスクリプト
 
 MIR-1K (Music Information Retrieval - 1000 clips) は歌声分離・ピッチ推定のための
-評価用データセットです。
+評価用データセットです。SLASH論文では250クリップのサブセットを使用して評価します。
 
 データセット詳細:
 - 1,000の歌声クリップ (110のカラオケ曲から抽出)
+- SLASH評価用: 250クリップ（ランダム選択、デフォルト）
 - 総時間: 133分
 - 各クリップ: 4-13秒
 - データ容量: 約1.32GB
@@ -14,9 +15,9 @@ MIR-1K (Music Information Retrieval - 1000 clips) は歌声分離・ピッチ推
 - アノテーション: ピッチラベル, 無声フレームラベル, 歌詞, V/UV ラベル
 
 使用方法:
-    python scripts/download_mir1k_test.py [--partial] [--skip-existing]
+    python scripts/download_mir1k_test.py [--no-partial] [--skip-existing]
 
-    --partial: 評価に必要な最小セット（250クリップ）のみダウンロード
+    --no-partial: 全1,000クリップをダウンロード（デフォルトは250クリップ）
     --skip-existing: 既存ファイルをスキップ
 """
 
@@ -368,7 +369,7 @@ def create_eval_subset():
             return False
 
     wav_dir = wav_dirs[0] if wav_dirs[0].is_dir() else wav_dirs[0].parent
-    wav_files = list(wav_dir.glob("*.wav"))
+    wav_files = sorted(list(wav_dir.glob("*.wav")))
 
     if len(wav_files) < EVAL_SUBSET_SIZE:
         print(
@@ -501,7 +502,9 @@ def main():
         epilog=__doc__,
     )
     parser.add_argument(
-        "--partial", action="store_true", help="評価用サブセット（250クリップ）のみ作成"
+        "--no-partial",
+        action="store_true",
+        help="全1,000クリップをダウンロード（デフォルト: 250クリップ）",
     )
     parser.add_argument(
         "--skip-existing", action="store_true", help="既存ファイルをスキップ"
@@ -551,8 +554,8 @@ def main():
         print("ERROR: データセット検証に失敗しました")
         sys.exit(1)
 
-    # 部分セット作成（指定された場合）
-    if args.partial:
+    # 評価用サブセット作成（デフォルト）
+    if not args.no_partial:
         success = create_eval_subset()
         if not success:
             print("ERROR: 評価用サブセット作成に失敗しました")
@@ -565,12 +568,14 @@ def main():
     print("\n=== ダウンロード完了 ===")
     print(f"データセット場所: {DATASET_DIR}")
 
-    if args.partial:
+    if not args.no_partial:
         print(f"評価用サブセット: {DATASET_DIR / 'eval_250'}")
         print("SLASH論文の評価に必要な250クリップが利用可能です")
     else:
         print("フルデータセット（1,000クリップ）が利用可能です")
-        print("評価用サブセットが必要な場合は --partial オプションを使用してください")
+        print(
+            "評価用サブセットが必要な場合は、--no-partial オプションを指定せずに実行してください"
+        )
 
     print("\n次のステップ:")
     print("1. データセットの整合性を確認")

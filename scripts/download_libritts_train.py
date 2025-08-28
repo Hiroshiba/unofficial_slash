@@ -11,6 +11,7 @@ SLASH論文では LibriTTS-R の全学習データを使用して学習を行い
 - サンプリングレート: 24kHz
 - 総データ容量: 約84GB（全学習セット）
 - 構成: 7つのサブセット（dev_clean, dev_other, test_clean, test_other, train_clean_100, train_clean_360, train_other_500）
+    - 論文で用いるのは train_clean_100, train_clean_360, train_other_500 の3つのサブセットです。
 
 使用方法:
     python scripts/download_libritts_train.py [options]
@@ -132,9 +133,9 @@ TEMP_DIR = DATASET_DIR / "temp"
 # ダウンロード設定
 MAX_PARALLEL_DOWNLOADS = 16
 DEFAULT_PARALLEL_DOWNLOADS = 4
-CHUNK_SIZE = 8192  # 8KB chunks
+CHUNK_SIZE = 2**20
 RETRY_ATTEMPTS = 3
-RETRY_DELAY = 2.0  # seconds
+RETRY_DELAY = 2.0
 
 
 def setup_directories():
@@ -595,16 +596,6 @@ async def main():
     else:
         total_gb = sum(item["size_gb"] for item in download_plan)
         print(f"学習用データセットがダウンロードされました (約{total_gb:.1f}GB)")
-
-    print("\n次のステップ:")
-    print("1. データセットの整合性を確認")
-    print("2. SLASH学習スクリプトでの使用")
-    print("3. 必要に応じて前処理を実行")
-
-    print("\nSLASH学習実行例:")
-    print(
-        f"python train.py --dataset libritts-r --data_root {DATASET_DIR} --max_steps 100000"
-    )
 
 
 if __name__ == "__main__":
