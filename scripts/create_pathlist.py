@@ -236,7 +236,7 @@ def process_mir1k_dataset(
         if not base_dir.exists():
             print(f"ERROR: eval_250 サブセットが存在しません: {base_dir}")
             print(
-                "先に 'python scripts/download_mir1k_test.py --partial' でサブセットを作成してください"
+                "先に 'uv run scripts/download_mir1k_test.py' でサブセットを作成してください"
             )
             sys.exit(1)
     else:
@@ -244,7 +244,7 @@ def process_mir1k_dataset(
         if not base_dir.exists():
             print(f"ERROR: MIR-1K フルデータセットが存在しません: {base_dir}")
             print(
-                "先に 'python scripts/download_mir1k_test.py' でデータセットをダウンロードしてください"
+                "先に 'uv run scripts/download_mir1k_test.py --no-partial' でデータセットをダウンロードしてください"
             )
             sys.exit(1)
 

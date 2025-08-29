@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 LibriTTS-R 学習用データセットダウンロードスクリプト
 
@@ -14,7 +13,7 @@ SLASH論文では LibriTTS-R の全学習データを使用して学習を行い
     - 論文で用いるのは train_clean_100, train_clean_360, train_other_500 の3つのサブセットです。
 
 使用方法:
-    python scripts/download_libritts_train.py [options]
+    uv run scripts/download_libritts_train.py [options]
 
     --subsets: ダウンロードするサブセット選択（デフォルト: 全学習用セット）
     --parallel: 並列ダウンロード数（デフォルト: 4, 最大: 16）
@@ -241,7 +240,9 @@ async def download_file_from_mirror(
                 progress_bar.update(expected_size)
                 return True
             else:
-                progress_bar.write(f"INFO: {filename} サイズが異なるため再ダウンロード")
+                progress_bar.write(f"WARNING: {filename} のファイルサイズが異なりますがスキップします ({actual_size} != {expected_size})")
+                progress_bar.update(expected_size)
+                return True
 
         # リトライ付きダウンロード
         for attempt in range(RETRY_ATTEMPTS):

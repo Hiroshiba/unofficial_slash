@@ -15,7 +15,7 @@ MIR-1K (Music Information Retrieval - 1000 clips) は歌声分離・ピッチ推
 - アノテーション: ピッチラベル, 無声フレームラベル, 歌詞, V/UV ラベル
 
 使用方法:
-    python scripts/download_mir1k_test.py [--no-partial] [--skip-existing]
+    uv run scripts/download_mir1k_test.py [--no-partial] [--skip-existing]
 
     --no-partial: 全1,000クリップをダウンロード（デフォルトは250クリップ）
     --skip-existing: 既存ファイルをスキップ
@@ -73,133 +73,62 @@ def setup_directories():
     print(f"一時ディレクトリ: {TEMP_DIR}")
 
 
-def get_dataset_info():
-    """複数ソースからデータセット情報を取得"""
-    print("MIR-1K データセット情報を取得中...")
+def try_download_from_figshare(skip_existing: bool = False) -> bool:
+    """Figshare APIからダウンロードを試行（情報取得→即座ダウンロード）"""
+    source = DATASET_SOURCES[0]  # Figshareソース
+    source_name = source["name"]
 
-    for source in DATASET_SOURCES:
-        source_name = source["name"]
-        print(f"\n{source_name} から情報を取得中...")
+    print(f"\n{source_name} からダウンロード試行中...")
 
-        try:
-            if "api_url" in source:
-                # API経由でファイル情報を取得
-                response = requests.get(source["api_url"], timeout=30)
-                response.raise_for_status()
-                record_data = response.json()
-
-                files = record_data.get("files", [])
-                if not files:
-                    print(f"  {source_name}: ファイルが見つかりません")
-                    continue
-
-                # 最初のファイルを使用（通常は1ファイルのみ）
-                file_info = files[0]
-                download_info = {
-                    "source": source_name,
-                    "filename": file_info[source["filename_key"]],
-                    "download_url": file_info[source["file_key"]],
-                    "size": file_info[source["size_key"]],
-                    "md5": file_info.get(source["md5_key"]),
-                    "metadata": record_data,
-                }
-
-                print(
-                    f"  ✓ {source_name}: {download_info['filename']} ({download_info['size'] / 1024 / 1024:.1f} MB)"
-                )
-                if download_info["md5"]:
-                    print(f"    MD5: {download_info['md5']}")
-
-                return download_info
-
-            elif "direct_urls" in source:
-                # 直接URLの可用性をチェック
-                for url in source["direct_urls"]:
-                    try:
-                        response = requests.head(url, timeout=10)
-                        if response.status_code == 200:
-                            filename = url.split("/")[-1]
-                            size = int(response.headers.get("content-length", 0))
-
-                            download_info = {
-                                "source": source_name,
-                                "filename": filename,
-                                "download_url": url,
-                                "size": size,
-                                "md5": None,
-                                "metadata": None,
-                            }
-
-                            print(
-                                f"  ✓ {source_name}: {filename} ({size / 1024 / 1024:.1f} MB)"
-                            )
-                            return download_info
-                    except:
-                        continue
-
-                print(f"  ✗ {source_name}: 利用可能なURLが見つかりません")
-
-        except requests.RequestException as e:
-            print(f"  ✗ {source_name}: アクセスエラー - {e}")
-        except Exception as e:
-            print(f"  ✗ {source_name}: 情報取得エラー - {e}")
-
-    # 全てのソースで失敗
-    print("\nERROR: 利用可能なダウンロードソースが見つかりません")
-    print("\n手動ダウンロードオプション:")
-    print("1. Figshare: https://figshare.com/articles/dataset/MIR-1K_rar/5802891")
-    print("2. 論文著者に直接連絡してアクセス方法を確認")
-    print("3. 他の歌声分離データセット（MUSDB18など）の使用を検討")
-    sys.exit(1)
-
-
-def download_file(
-    url: str, filename: str, expected_size: int, skip_existing: bool = False
-) -> bool:
-    """ファイルをダウンロード（進捗表示付き）"""
-    file_path = TEMP_DIR / filename
-
-    # 既存ファイルのチェック
-    if skip_existing and file_path.exists():
-        actual_size = file_path.stat().st_size
-        if actual_size == expected_size:
-            print(f"SKIP: {filename} (既に存在)")
-            return True
-        else:
-            print(
-                f"INFO: {filename} のサイズが異なるため再ダウンロード ({actual_size} != {expected_size})"
-            )
-
-    print(f"ダウンロード中: {filename}")
-
-    session = None  # セッション初期化
+    session = None
     try:
-        # リダイレクトを許可してセッションを使用
+        # API経由でファイル情報を取得
+        response = requests.get(source["api_url"], timeout=30)
+        response.raise_for_status()
+        record_data = response.json()
+
+        files = record_data.get("files", [])
+        if not files:
+            print(f"  ✗ {source_name}: ファイルが見つかりません")
+            return False
+
+        # 最初のファイルを使用（通常は1ファイルのみ）
+        file_info = files[0]
+        filename = file_info[source["filename_key"]]
+        download_url = file_info[source["file_key"]]
+        expected_size = file_info[source["size_key"]]
+        md5_hash = file_info.get(source["md5_key"])
+
+        print(f"  ✓ {source_name}: {filename} ({expected_size / 1024 / 1024:.1f} MB)")
+        if md5_hash:
+            print(f"    MD5: {md5_hash}")
+
+        # 即座にダウンロード開始（署名付きURL有効期限対策）
+        file_path = TEMP_DIR / filename
+
+        # 既存ファイルのチェック
+        if skip_existing and file_path.exists():
+            actual_size = file_path.stat().st_size
+            if actual_size == expected_size:
+                print(f"SKIP: {filename} (既に存在)")
+                return True
+            else:
+                print(
+                    f"WARNING: {filename} のファイルサイズが異なりますがスキップします ({actual_size} != {expected_size})"
+                )
+                return True
+
+        print(f"ダウンロード中: {filename}")
+
+        # セッション作成とダウンロード
         session = requests.Session()
-
-        # 最初にHEADリクエストで実際のURLとサイズを取得
-        head_response = session.head(url, allow_redirects=True, timeout=30)
-        head_response.raise_for_status()
-        final_url = head_response.url
-        content_length = head_response.headers.get("content-length")
-
-        if content_length:
-            total_size = int(content_length)
-        else:
-            total_size = expected_size
-
-        print(f"  ダウンロードURL: {final_url}")
-        print(f"  実際のサイズ: {total_size / 1024 / 1024:.1f} MB")
-
-        # ストリーミングダウンロード
-        response = session.get(final_url, stream=True, timeout=30)
+        response = session.get(download_url, stream=True, timeout=30)
         response.raise_for_status()
 
         downloaded_size = 0
-
         with open(file_path, "wb") as f:
             with tqdm(
-                total=total_size, unit="B", unit_scale=True, desc=filename
+                total=expected_size, unit="B", unit_scale=True, desc=filename
             ) as pbar:
                 for chunk in response.iter_content(chunk_size=8192):
                     if chunk:
@@ -210,31 +139,133 @@ def download_file(
 
         # ダウンロード完了の確認
         actual_size = file_path.stat().st_size
-        print(f"ダウンロード完了: {filename}")
-        print(f"  期待サイズ: {expected_size / 1024 / 1024:.1f} MB")
-        print(f"  実際サイズ: {actual_size / 1024 / 1024:.1f} MB")
-        print(f"  ダウンロード済み: {downloaded_size / 1024 / 1024:.1f} MB")
+        print(f"ダウンロード完了: {filename} ({actual_size / 1024 / 1024:.1f} MB)")
 
         if abs(actual_size - expected_size) > 1024:  # 1KB以上の差があれば警告
-            print("WARNING: ファイルサイズが期待値と異なります")
-            print(f"  差分: {abs(actual_size - expected_size)} bytes")
+            print(
+                f"WARNING: ファイルサイズが期待値と異なります (差分: {abs(actual_size - expected_size)} bytes)"
+            )
 
         return True
 
     except requests.RequestException as e:
-        print(f"ERROR: ダウンロードに失敗: {e}")
-        if file_path.exists():
-            file_path.unlink()
+        print(f"  ✗ {source_name}: ダウンロードエラー - {e}")
         return False
     except Exception as e:
-        print(f"ERROR: ファイル保存に失敗: {e}")
-        if file_path.exists():
-            file_path.unlink()
+        print(f"  ✗ {source_name}: 処理エラー - {e}")
         return False
     finally:
-        # セッションをクリーンアップ
         if session:
             session.close()
+
+
+def try_download_from_mirlab(skip_existing: bool = False) -> bool:
+    """Original MIR Labからダウンロードを試行"""
+    source = DATASET_SOURCES[1]  # Original MIR Lab ソース
+    source_name = source["name"]
+
+    print(f"\n{source_name} からダウンロード試行中...")
+
+    session = None
+    try:
+        # 直接URLの可用性をチェックしてダウンロード
+        for url in source["direct_urls"]:
+            try:
+                session = requests.Session()
+                response = session.head(url, timeout=10)
+                if response.status_code == 200:
+                    filename = url.split("/")[-1]
+                    expected_size = int(response.headers.get("content-length", 0))
+
+                    print(
+                        f"  ✓ {source_name}: {filename} ({expected_size / 1024 / 1024:.1f} MB)"
+                    )
+
+                    # 即座にダウンロード開始
+                    file_path = TEMP_DIR / filename
+
+                    # 既存ファイルのチェック
+                    if skip_existing and file_path.exists():
+                        actual_size = file_path.stat().st_size
+                        if actual_size == expected_size:
+                            print(f"SKIP: {filename} (既に存在)")
+                            return True
+                        else:
+                            print(
+                                f"WARNING: {filename} のファイルサイズが異なりますがスキップします ({actual_size} != {expected_size})"
+                            )
+                            return True
+
+                    print(f"ダウンロード中: {filename}")
+
+                    response = session.get(url, stream=True, timeout=30)
+                    response.raise_for_status()
+
+                    downloaded_size = 0
+                    with open(file_path, "wb") as f:
+                        with tqdm(
+                            total=expected_size,
+                            unit="B",
+                            unit_scale=True,
+                            desc=filename,
+                        ) as pbar:
+                            for chunk in response.iter_content(chunk_size=8192):
+                                if chunk:
+                                    chunk_size = len(chunk)
+                                    f.write(chunk)
+                                    downloaded_size += chunk_size
+                                    pbar.update(chunk_size)
+
+                    # ダウンロード完了の確認
+                    actual_size = file_path.stat().st_size
+                    print(
+                        f"ダウンロード完了: {filename} ({actual_size / 1024 / 1024:.1f} MB)"
+                    )
+
+                    return True
+
+            except Exception as e:
+                print(f"  URL試行失敗: {url} - {e}")
+                continue
+
+        print(f"  ✗ {source_name}: 利用可能なURLが見つかりません")
+        return False
+
+    except Exception as e:
+        print(f"  ✗ {source_name}: 処理エラー - {e}")
+        return False
+    finally:
+        if session:
+            session.close()
+
+
+def download_dataset(skip_existing: bool = False) -> tuple[bool, str, str]:
+    """複数ソースを順次試行してダウンロード"""
+    print("MIR-1K データセットダウンロード開始...")
+
+    download_functions = [
+        ("Figshare", try_download_from_figshare),
+        ("Original MIR Lab", try_download_from_mirlab),
+    ]
+
+    for source_name, download_func in download_functions:
+        if download_func(skip_existing):
+            # ダウンロードされたファイルを検索
+            downloaded_files = list(TEMP_DIR.glob("*.rar")) + list(
+                TEMP_DIR.glob("*.zip")
+            )
+            if downloaded_files:
+                filename = downloaded_files[0].name
+                print(f"\n✓ {source_name} からのダウンロードに成功: {filename}")
+                return True, source_name, filename
+
+    # 全てのソースで失敗
+    print("\nERROR: 全てのダウンロードソースで失敗しました")
+    print("\n手動ダウンロードオプション:")
+    print("1. Figshare: https://figshare.com/articles/dataset/MIR-1K_rar/5802891")
+    print("2. 論文著者に直接連絡してアクセス方法を確認")
+    print("3. 他の歌声分離データセット（MUSDB18など）の使用を検討")
+    return False, "", ""
 
 
 def extract_dataset(filename: str):
@@ -274,7 +305,7 @@ def extract_dataset(filename: str):
                 print("インストール方法:")
                 print("  Ubuntu/Debian: sudo apt install unrar")
                 print("  CentOS/RHEL: sudo yum install unrar")
-                print("  macOS: brew install unrar")
+                print("  macOS: brew install carlocab/personal/unrar")
                 return False
 
             print("unrarコマンドが利用可能です")
@@ -360,26 +391,28 @@ def create_eval_subset():
     """評価用サブセット（250クリップ）を作成"""
     print("評価用サブセット作成中...")
 
-    # 音声ファイルディレクトリを探す
-    wav_dirs = list(DATASET_DIR.rglob("*[Ww]avfile*"))
-    if not wav_dirs:
-        wav_dirs = list(DATASET_DIR.rglob("*.wav"))
-        if not wav_dirs:
-            print("ERROR: 音声ファイルが見つかりません")
-            return False
+    # 音声ファイルディレクトリを確認
+    wavfile_dir = DATASET_DIR / "MIR-1K" / "Wavfile"
 
-    wav_dir = wav_dirs[0] if wav_dirs[0].is_dir() else wav_dirs[0].parent
-    wav_files = sorted(list(wav_dir.glob("*.wav")))
+    if not wavfile_dir.exists():
+        print("ERROR: Wavfileディレクトリが見つかりません")
+        return False
+
+    wav_files = sorted(list(wavfile_dir.glob("*.wav")))
+
+    if len(wav_files) == 0:
+        print("ERROR: 音声ファイルが見つかりません")
+        return False
 
     if len(wav_files) < EVAL_SUBSET_SIZE:
         print(
-            f"WARNING: 利用可能ファイル数 ({len(wav_files)}) が評価セット数 ({EVAL_SUBSET_SIZE}) より少ない"
+            f"ERROR: 利用可能ファイル数 ({len(wav_files)}) が評価セット数 ({EVAL_SUBSET_SIZE}) より少ない"
         )
-        selected_files = wav_files
-    else:
-        # 再現性のためのシード設定
-        random.seed(EVAL_SEED)
-        selected_files = random.sample(wav_files, EVAL_SUBSET_SIZE)
+        return False
+
+    # 再現性のためのシード設定
+    random.seed(EVAL_SEED)
+    selected_files = random.sample(wav_files, EVAL_SUBSET_SIZE)
 
     # 評価用ディレクトリを作成
     eval_dir = DATASET_DIR / "eval_250"
@@ -413,11 +446,16 @@ def create_eval_subset():
             dst_dir = eval_dir / subdir
 
             if not src_dir.exists():
-                # フルデータセット内でディレクトリを探す
-                possible_dirs = list(DATASET_DIR.rglob(f"*{subdir}*"))
+                # フルデータセット内でディレクトリを探す（完全一致のディレクトリ名のみ）
+                possible_dirs = []
+                for potential_path in DATASET_DIR.rglob("*"):
+                    if potential_path.is_dir() and potential_path.name == subdir:
+                        possible_dirs.append(potential_path)
+
                 if possible_dirs:
                     src_dir = possible_dirs[0]
                 else:
+                    print(f"WARNING: {subdir} ディレクトリが見つかりません")
                     continue
 
             # 対応するファイルを探す（ディレクトリごとに想定拡張子を指定）
@@ -478,7 +516,11 @@ def verify_dataset():
     found_dirs = []
 
     for req_dir in required_dirs:
-        possible_dirs = list(DATASET_DIR.rglob(f"*{req_dir}*"))
+        possible_dirs = []
+        for potential_path in DATASET_DIR.rglob("*"):
+            if potential_path.is_dir() and potential_path.name == req_dir:
+                possible_dirs.append(potential_path)
+
         if possible_dirs:
             found_dirs.append(req_dir)
             dir_path = possible_dirs[0]
@@ -486,13 +528,18 @@ def verify_dataset():
             print(f"  ✓ {req_dir}: {file_count} ファイル")
         else:
             print(f"  ✗ {req_dir}: 見つかりません")
+            print(
+                f"     利用可能なディレクトリ: {[d.name for d in DATASET_DIR.rglob('*') if d.is_dir()]}"
+            )
 
-    if len(found_dirs) >= 2:  # 最低限WAVファイルとラベルがあれば使用可能
+    if len(found_dirs) >= 2:
         print("✓ データセット検証完了")
         return True
     else:
-        print("✗ データセット検証失敗")
-        return False
+        print("✗ データセット検証失敗 - 必要なディレクトリが不足しています")
+        raise FileNotFoundError(
+            f"必要なディレクトリが見つかりません。見つかったディレクトリ: {found_dirs}"
+        )
 
 
 def main():
@@ -521,27 +568,13 @@ def main():
     # ディレクトリセットアップ
     setup_directories()
 
-    # データセット情報を取得
-    dataset_info = get_dataset_info()
-
-    filename = dataset_info["filename"]
-    download_url = dataset_info["download_url"]
-    expected_size = dataset_info["size"]
-    md5_hash = dataset_info["md5"]
-    source = dataset_info["source"]
-
-    print("\nダウンロード準備:")
-    print(f"  ソース: {source}")
-    print(f"  ファイル: {filename}")
-    print(f"  サイズ: {expected_size / 1024 / 1024:.1f} MB")
-    if md5_hash:
-        print(f"  MD5: {md5_hash}")
-
-    # ダウンロード
-    success = download_file(download_url, filename, expected_size, args.skip_existing)
+    # データセットダウンロード
+    success, source, filename = download_dataset(args.skip_existing)
     if not success:
         print("ERROR: ダウンロードに失敗しました")
         sys.exit(1)
+    else:
+        print(f"ダウンロード成功: {source} から {filename} を取得")
 
     # 展開
     success = extract_dataset(filename)
@@ -576,11 +609,6 @@ def main():
         print(
             "評価用サブセットが必要な場合は、--no-partial オプションを指定せずに実行してください"
         )
-
-    print("\n次のステップ:")
-    print("1. データセットの整合性を確認")
-    print("2. SLASH学習・評価スクリプトでの使用")
-    print("3. 必要に応じて前処理（リサンプリングなど）を実行")
 
 
 if __name__ == "__main__":
