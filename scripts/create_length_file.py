@@ -5,23 +5,39 @@ from functools import partial
 from multiprocessing import Pool
 from pathlib import Path
 
+import fsspec
 import torchaudio
+from fsspec.implementations.local import LocalFileSystem
 from tqdm import tqdm
+from upath import UPath
 
 from unofficial_slash.sampler import LengthBatchSampler
 
 
-def _calculate_single_audio_length(audio_path: Path, frame_length: int) -> int:
+# TODO: dataset.pyにある同一コードと共通化する
+def _to_local_path(p: UPath) -> Path:
+    """リモートならキャッシュを作ってそのパスを、ローカルならそのままそのパスを返す"""
+    if isinstance(p.fs, LocalFileSystem):
+        return Path(p)
+    obj = fsspec.open_local(
+        "simplecache::" + str(p), simplecache={"cache_storage": "./hiho_cache/"}
+    )
+    if isinstance(obj, list):
+        raise ValueError(f"複数のローカルパスが返されました: {p} -> {obj}")
+    return Path(obj)
+
+
+def _calculate_single_audio_length(audio_path: UPath, frame_length: int) -> int:
     """単一音声ファイルの長さを計算"""
     if not audio_path.exists():
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
-    total_samples = torchaudio.info(audio_path).num_frames
+    total_samples = torchaudio.info(_to_local_path(audio_path)).num_frames
     return total_samples // frame_length
 
 
 def _calculate_audio_lengths(
-    pathlist_path: Path, root_dir: Path, workers: int, frame_length: int
+    pathlist_path: UPath, root_dir: UPath, workers: int, frame_length: int
 ) -> list[int]:
     """パスリストファイルから各音声ファイルの長さを並列計算"""
     if not pathlist_path.exists():
@@ -45,9 +61,9 @@ def _calculate_audio_lengths(
 
 
 def _create_length_file_from_pathlist(
-    pathlist_path: Path,
-    root_dir: Path,
-    output_path: Path,
+    pathlist_path: UPath,
+    root_dir: UPath,
+    output_path: UPath,
     workers: int,
     frame_length: int,
 ) -> list[int]:
@@ -115,9 +131,9 @@ def _calculate_batch_bins_for_target_batch_size(
 
 
 def create_length_file(
-    pathlist_path: Path,
-    root_dir: Path,
-    output_path: Path,
+    pathlist_path: UPath,
+    root_dir: UPath,
+    output_path: UPath,
     target_batch_size: int,
     min_batch_size: int,
     max_batch_size: int,
@@ -146,9 +162,9 @@ def create_length_file(
 def main():
     """音声長ファイル作成と平均バッチサイズに対するbatch_bins値の計算"""
     parser = argparse.ArgumentParser(description="音声長ファイル作成スクリプト")
-    parser.add_argument("pathlist_path", type=Path)
-    parser.add_argument("--root-dir", type=Path, default=Path("train_dataset"))
-    parser.add_argument("--output-path", type=Path, required=True)
+    parser.add_argument("pathlist_path", type=UPath)
+    parser.add_argument("--root-dir", type=UPath, default=UPath("train_dataset"))
+    parser.add_argument("--output-path", type=UPath, required=True)
     parser.add_argument("--target-batch-size", type=int, default=17)
     parser.add_argument("--min-batch-size", type=int, default=1)
     parser.add_argument("--max-batch-size", type=int, default=32)

@@ -240,7 +240,9 @@ async def download_file_from_mirror(
                 progress_bar.update(expected_size)
                 return True
             else:
-                progress_bar.write(f"WARNING: {filename} のファイルサイズが異なりますがスキップします ({actual_size} != {expected_size})")
+                progress_bar.write(
+                    f"WARNING: {filename} のファイルサイズが異なりますがスキップします ({actual_size} != {expected_size})"
+                )
                 progress_bar.update(expected_size)
                 return True
 
