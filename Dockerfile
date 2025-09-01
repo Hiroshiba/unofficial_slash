@@ -20,3 +20,9 @@ WORKDIR /app
 COPY --from=ghcr.io/astral-sh/uv:0.6.14 /uv /uvx /bin/
 COPY pyproject.toml uv.lock /app/
 RUN uv sync --no-install-project
+
+# for torch.compile
+RUN apt-get update && \
+    apt-get install -y gcc g++ cmake && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
