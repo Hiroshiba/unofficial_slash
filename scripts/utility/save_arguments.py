@@ -2,10 +2,11 @@
 
 import inspect
 from collections.abc import Callable
-from pathlib import Path, PosixPath, WindowsPath
+from pathlib import Path
 from typing import Any
 
 import yaml
+from upath import UPath
 
 from unofficial_slash.dataset import DatasetType
 
@@ -14,8 +15,8 @@ def _str_represent(dumper, data):
     return dumper.represent_str(str(data))
 
 
-yaml.SafeDumper.add_representer(PosixPath, _str_represent)
-yaml.SafeDumper.add_representer(WindowsPath, _str_represent)
+yaml.SafeDumper.add_multi_representer(Path, _str_represent)
+yaml.SafeDumper.add_multi_representer(UPath, _str_represent)
 yaml.SafeDumper.add_representer(DatasetType, _str_represent)
 
 

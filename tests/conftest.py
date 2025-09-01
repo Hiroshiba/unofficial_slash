@@ -23,9 +23,9 @@ def input_data_dir() -> Path:
 
 
 @pytest.fixture(scope="session")
-def output_data_dir() -> Path:
+def output_data_dir() -> UPath:
     """出力データディレクトリのパス"""
-    return Path(__file__).parent / "output_data"
+    return UPath(__file__).parent / "output_data"
 
 
 @pytest.fixture(scope="session")
