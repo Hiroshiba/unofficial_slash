@@ -110,7 +110,6 @@ def create_data_loader(
         batch_bins=data_file_config.batch_bins,
         lengths=dataset.lengths,
         min_batch_size=config.train.min_batch_size,
-        max_batch_size=config.train.max_batch_size,
         drop_last=for_train,
     )
     return DataLoader(

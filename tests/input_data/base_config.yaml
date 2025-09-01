@@ -90,7 +90,6 @@ train:
   batch_size: 5 # NOTE: SLASH論文では17
   eval_batch_size: 5
   min_batch_size: 1
-  max_batch_size: 32
 
   log_epoch: 1
   eval_epoch: 2

@@ -103,7 +103,6 @@ def _calculate_batch_bins_for_target_batch_size(
             batch_bins=mid_bins,
             lengths=lengths,
             min_batch_size=min_batch_size,
-            max_batch_size=max_batch_size,
             drop_last=True,
         )
 

@@ -119,7 +119,6 @@ class TrainConfig(_Model):
     batch_size: int
     eval_batch_size: int
     min_batch_size: int
-    max_batch_size: int
 
     log_epoch: int
     eval_epoch: int

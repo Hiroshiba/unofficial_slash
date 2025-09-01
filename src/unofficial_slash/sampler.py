@@ -20,13 +20,11 @@ class LengthBatchSampler(Sampler[list[int]]):
         batch_bins: int,
         lengths: list[int],
         min_batch_size: int,
-        max_batch_size: int,
         drop_last: bool,
     ):
         self.batch_bins = batch_bins
         self.lengths = lengths
         self.min_batch_size = min_batch_size
-        self.max_batch_size = max_batch_size
         self.drop_last = drop_last
 
         self._make_batches()
@@ -38,32 +36,24 @@ class LengthBatchSampler(Sampler[list[int]]):
 
         batches = []
         current_batch = []
-        current_bins = 0
 
         for idx, length in indices_and_lengths:
-            if len(current_batch) == 0:
-                current_batch.append(idx)
-                current_bins = length
-            else:
-                max_length = max(length, current_bins // len(current_batch))
-                required_bins = max_length * (len(current_batch) + 1)
+            current_batch.append(idx)
+            bins = length * len(current_batch)
 
-                if (
-                    required_bins <= self.batch_bins
-                    and len(current_batch) < self.max_batch_size
-                ):
-                    current_batch.append(idx)
-                    current_bins = required_bins
-                else:
-                    if len(current_batch) >= self.min_batch_size:
-                        batches.append(current_batch)
-                    current_batch = [idx]
-                    current_bins = length
+            if bins > self.batch_bins and len(current_batch) >= self.min_batch_size:
+                current_batch.pop()
+                if current_batch:
+                    batches.append(current_batch)
+                current_batch = [idx]
 
         if current_batch and (
             not self.drop_last or len(current_batch) >= self.min_batch_size
         ):
             batches.append(current_batch)
+
+        for batch in batches:
+            batch.sort(key=lambda i: self.lengths[i], reverse=True)
 
         self.batches = batches
 
