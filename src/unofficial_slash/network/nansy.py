@@ -92,6 +92,7 @@ class NansyPitchEncoder(nn.Module):
         self.f0_head = nn.Linear(gru_output_size, f0_bins)
         self.bap_head = nn.Linear(gru_output_size, bap_bins)
 
+    @torch.compile()
     def forward(  # noqa: D102
         self,
         cqt: Tensor,  # (B, T, ?)

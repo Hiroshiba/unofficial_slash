@@ -157,13 +157,6 @@ def pseudo_spectrogram_loss(
     window_size: int,
 ) -> Tensor:
     """Pseudo Spectrogram Loss (L_pseudo) - SLASH論文 Equation (6)"""
-    # Fine structure spectrum計算: ψ(S*) と ψ(S)
-    psi_pseudo = fine_structure_spectrum(pseudo_spectrogram, window_size)  # (B, T, K)
-    psi_target = fine_structure_spectrum(target_spectrogram, window_size)  # (B, T, K)
-
-    # L1ノルム: ||ψ(S*) - ψ(S)||₁
-    l1_diff = torch.abs(psi_pseudo - psi_target)  # (B, T, K)
-
     min_frames = validate_frame_alignment(
         pseudo_spectrogram.shape[1],
         target_spectrogram.shape[1],
@@ -189,9 +182,11 @@ def pseudo_spectrogram_loss(
     valid_elements = combined_mask_expanded.sum()
 
     if valid_elements == 0:
-        raise ValueError("No valid frames for pseudo spectrogram loss")
+        # NOTE: 学習初期はわりと起こり得る。
+        loss = torch.tensor(0.0, device=pseudo_spectrogram.device)
+    else:
+        loss = masked_loss.sum() / valid_elements.float()
 
-    loss = masked_loss.sum() / valid_elements.float()
     return loss
 
 
@@ -326,6 +321,11 @@ class Model(nn.Module):
         self.model_config = model_config
         self.predictor = predictor
 
+        self.register_buffer(
+            "_hann_window_pseudo",
+            torch.hann_window(self.predictor.network_config.pseudo_spec_n_fft),
+        )
+
     def forward(self, batch: BatchOutput) -> ModelOutput:
         """データをネットワークに入力して損失などを計算する"""
         # NOTE: SLASH論文準拠の自己教師あり学習では、学習時にground truth F0ラベルは使用しない
@@ -391,7 +391,7 @@ class Model(nn.Module):
             batch.audio,
             n_fft=n_fft,
             hop_length=hop_length,
-            window=torch.hann_window(n_fft, device=device),
+            window=self._hann_window_pseudo,
             return_complex=True,
         )
         target_spectrogram = torch.abs(stft_result).transpose(-1, -2)  # (B, T, K)

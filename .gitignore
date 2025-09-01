@@ -160,3 +160,4 @@ cython_debug/
 
 # データセットディレクトリ
 train_dataset/
+hiho_cache/

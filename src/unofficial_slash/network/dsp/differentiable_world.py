@@ -40,6 +40,7 @@ class DifferentiableWorld(nn.Module):
         assert self.n_fft >= self.synth_hop_length, (
             f"n_fft ({self.n_fft}) must be >= synth_hop_length ({self.synth_hop_length}) to avoid negative padding"
         )
+        self.register_buffer("_hann_window", torch.hann_window(self.n_fft))
 
     def forward(
         self,
@@ -217,14 +218,11 @@ class DifferentiableWorld(nn.Module):
             aperiodicity_transposed,
         )
 
-        device = f0_hz.device
-        window = torch.hann_window(n_fft, device=device)
-
         stft_result = torch.stft(
             waveform_aperiodic,
             n_fft=n_fft,
             hop_length=hop_length,
-            window=window,
+            window=self._hann_window,
             center=True,
             return_complex=True,
         )
@@ -299,7 +297,7 @@ class DifferentiableWorld(nn.Module):
 
         # Hann窓を作成
         device = audio1.device
-        window = torch.hann_window(self.n_fft, device=device)
+        window = self._hann_window.to(device=device, dtype=audio1.dtype)
 
         # STFTでスペクトログラム化
         spec1 = torch.stft(

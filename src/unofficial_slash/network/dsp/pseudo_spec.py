@@ -79,6 +79,7 @@ class PseudoSpectrogramGenerator(nn.Module):
         self.n_fft = n_fft
         self.hop_length = hop_length
 
+    @torch.compile()
     def forward(
         self,
         *,

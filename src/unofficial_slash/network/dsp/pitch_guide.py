@@ -132,6 +132,7 @@ class PitchGuideGenerator(nn.Module):
         self.f_min = f_min
         self.f_max = f_max
         self.n_pitch_bins = n_pitch_bins
+        self.register_buffer("_hann_window", torch.hann_window(self.n_fft))
 
     def forward(self, waveform: Tensor) -> Tensor:  # (B, T) -> (B, T, F)
         """音声波形からPitch Guideを生成"""
@@ -141,7 +142,7 @@ class PitchGuideGenerator(nn.Module):
             waveform,
             n_fft=self.n_fft,
             hop_length=self.hop_length,
-            window=torch.hann_window(self.n_fft, device=device),
+            window=self._hann_window,
             return_complex=True,
         )
         amplitude_spec = torch.abs(stft_result).transpose(-1, -2)  # (B, T, K)

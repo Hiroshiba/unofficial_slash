@@ -67,6 +67,7 @@ class VUVDetector(nn.Module):
         self.vuv_threshold = vuv_threshold
         self.eps = eps
 
+    @torch.compile()
     def forward(
         self,
         spectral_envelope: Tensor,  # (B, T, K) スペクトル包絡 H
