@@ -161,13 +161,14 @@ class Predictor(nn.Module):
         audio: Tensor,  # (B, T)
     ) -> tuple[Tensor, Tensor, Tensor]:  # (B, T, ?), (B, T), (B, T, ?)
         """通常の推論用: audio -> CQT -> encode"""
-        # GPU対応CQT変換
-        cqt_full = self.cqt_transform(audio)  # (B, cqt_total_bins, T)
+        with torch.no_grad():
+            # GPU対応CQT変換
+            cqt_full = self.cqt_transform(audio)  # (B, cqt_total_bins, T)
 
-        # 中央176 binsを抽出
-        start_bin = (self.cqt_total_bins - self.cqt_target_bins) // 2
-        end_bin = start_bin + self.cqt_target_bins
-        cqt_central = cqt_full[:, start_bin:end_bin, :]  # (B, 176, T)
+            # 中央176 binsを抽出
+            start_bin = (self.cqt_total_bins - self.cqt_target_bins) // 2
+            end_bin = start_bin + self.cqt_target_bins
+            cqt_central = cqt_full[:, start_bin:end_bin, :]  # (B, 176, T)
 
         return self.encode_cqt(cqt_central)
 
@@ -179,18 +180,19 @@ class Predictor(nn.Module):
         Tensor, Tensor, Tensor, Tensor, Tensor
     ]:  # (B, T, ?), (B, T), (B, T, ?), (B, T, ?), (B, T)
         """学習用: audio -> CQT -> shift -> encode both"""
-        # GPU対応CQT変換
-        cqt_full = self.cqt_transform(audio)  # (B, cqt_total_bins, T)
+        with torch.no_grad():
+            # GPU対応CQT変換
+            cqt_full = self.cqt_transform(audio)  # (B, cqt_total_bins, T)
 
-        # 中央176 binsを抽出
-        start_bin = (self.cqt_total_bins - self.cqt_target_bins) // 2
-        end_bin = start_bin + self.cqt_target_bins
-        cqt_central = cqt_full[:, start_bin:end_bin, :]  # (B, 176, T)
+            # 中央176 binsを抽出
+            start_bin = (self.cqt_total_bins - self.cqt_target_bins) // 2
+            end_bin = start_bin + self.cqt_target_bins
+            cqt_central = cqt_full[:, start_bin:end_bin, :]  # (B, 176, T)
 
-        # CQT空間でピッチシフト（論文準拠）
-        cqt_shifted = shift_cqt_frequency(
-            cqt_central, shift_semitones, self.bins_per_octave
-        )  # (B, 176, T)
+            # CQT空間でピッチシフト（論文準拠）
+            cqt_shifted = shift_cqt_frequency(
+                cqt_central, shift_semitones, self.bins_per_octave
+            )  # (B, 176, T)
 
         # 両方を推定
         f0_logits_orig, f0_values_orig, bap_orig = self.encode_cqt(cqt_central)

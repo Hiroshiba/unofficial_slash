@@ -179,15 +179,15 @@ def get_data_paths(
     # 最初のpathlistをベースにstemリストを作成
     first_pathlist_path = pathlist_paths[0]
     first_paths = _load_pathlist(first_pathlist_path, root_dir)
-    fn_list = sorted(first_paths.keys())
+    fn_list = list(first_paths.keys())
     assert len(fn_list) > 0, f"ファイルが存在しません: {first_pathlist_path}"
 
     path_mappings.append(first_paths)
 
-    # 残りのpathlistが同じstemセットを持つかチェック
+    # 残りのpathlistが同じstemリストを持つかチェック
     for pathlist_path in pathlist_paths[1:]:
         paths = _load_pathlist(pathlist_path, root_dir)
-        assert set(fn_list) == set(paths.keys()), (
+        assert fn_list == list(paths.keys()), (
             f"ファイルが一致しません: {pathlist_path} (expected: {len(fn_list)}, got: {len(paths)})"
         )
         path_mappings.append(paths)
