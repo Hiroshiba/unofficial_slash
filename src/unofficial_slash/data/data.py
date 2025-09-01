@@ -38,9 +38,7 @@ def preprocess(
         d.pitch_label.astype(numpy.float32) if d.pitch_label is not None else None
     )
 
-    # ピッチシフト量の決定（学習時のみ）
     pitch_shift_semitones = 0.0
-
     if not is_eval:
         rng = numpy.random.default_rng()
         pitch_shift_bins = rng.integers(-pitch_shift_range, pitch_shift_range + 1)
@@ -48,8 +46,8 @@ def preprocess(
 
     return OutputData(
         audio=torch.from_numpy(audio_data).float(),
-        pitch_label=torch.from_numpy(pitch_labels).float()
-        if pitch_labels is not None
-        else None,
+        pitch_label=(
+            torch.from_numpy(pitch_labels).float() if pitch_labels is not None else None
+        ),
         pitch_shift_semitones=pitch_shift_semitones,
     )

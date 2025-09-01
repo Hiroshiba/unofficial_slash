@@ -42,7 +42,10 @@ class LazyInputData:
         """ファイルからデータを読み込んでInputDataを生成"""
         # 音声ファイル読み込み
         audio, sr = torchaudio.load(_to_local_path(self.audio_path))
-        assert sr == sample_rate, f"Expected sample rate {sample_rate}, but got {sr}"
+        if sr != sample_rate:
+            audio = torchaudio.functional.resample(
+                audio, orig_freq=sr, new_freq=sample_rate
+            )
 
         # モノラル変換（ステレオの場合は左チャンネルのみ使用）
         if audio.shape[0] > 1:
