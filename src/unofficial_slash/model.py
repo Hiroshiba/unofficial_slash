@@ -1,6 +1,7 @@
 """モデルのモジュール。ネットワークの出力から損失を計算する。"""
 
 from dataclasses import dataclass
+from typing import Self
 
 import torch
 from torch import Tensor, nn
@@ -18,6 +19,7 @@ from unofficial_slash.utility.frame_mask_utils import (
     audio_mask_to_frame_mask,
     validate_frame_alignment,
 )
+from unofficial_slash.utility.pytorch_utility import detach_cpu
 from unofficial_slash.utility.train_utility import DataNumProtocol
 
 
@@ -39,6 +41,19 @@ class ModelOutput(DataNumProtocol):
     loss_aug: Tensor  # L_aug: 拡張データでの基本損失
     loss_g_aug: Tensor  # L_g-aug: 拡張データでのPitch Guide損失
     loss_ap: Tensor  # L_ap: Aperiodicity一貫性損失
+
+    def detach_cpu(self) -> Self:
+        """全てのTensorをdetachしてCPUに移動"""
+        self.loss = detach_cpu(self.loss)
+        self.loss_cons = detach_cpu(self.loss_cons)
+        self.loss_guide = detach_cpu(self.loss_guide)
+        self.loss_g_shift = detach_cpu(self.loss_g_shift)
+        self.loss_pseudo = detach_cpu(self.loss_pseudo)
+        self.loss_recon = detach_cpu(self.loss_recon)
+        self.loss_aug = detach_cpu(self.loss_aug)
+        self.loss_g_aug = detach_cpu(self.loss_g_aug)
+        self.loss_ap = detach_cpu(self.loss_ap)
+        return self
 
 
 def pitch_consistency_loss(

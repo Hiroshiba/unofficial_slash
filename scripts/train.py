@@ -30,7 +30,6 @@ from unofficial_slash.model import Model, ModelOutput
 from unofficial_slash.network.predictor import create_predictor
 from unofficial_slash.sampler import LengthBatchSampler
 from unofficial_slash.utility.pytorch_utility import (
-    detach_cpu,
     init_weights,
     make_optimizer,
     make_scheduler,
@@ -279,7 +278,7 @@ def train_one_epoch(context: TrainingContext) -> TrainingResults:
         context.scaler.step(context.optimizer)
         context.scaler.update()
 
-        train_results.append(detach_cpu(result))
+        train_results.append(result.detach_cpu())
 
     if context.scheduler is not None:
         context.scheduler.step()
@@ -300,8 +299,8 @@ def evaluate(context: TrainingContext) -> EvaluationResults:
     test_result_list: list[ModelOutput] = []
     for batch in context.test_loader:
         batch = batch.to_device(context.device, non_blocking=True)
-        result = context.model(batch)
-        test_result_list.append(detach_cpu(result))
+        model_result: ModelOutput = context.model(batch)
+        test_result_list.append(model_result.detach_cpu())
     test_result = reduce_result(test_result_list)
 
     # eval評価
@@ -310,8 +309,8 @@ def evaluate(context: TrainingContext) -> EvaluationResults:
     if context.eval_loader is not None:
         for batch in context.eval_loader:
             batch = batch.to_device(context.device, non_blocking=True)
-            result = context.evaluator(batch)
-            eval_result_list.append(detach_cpu(result))
+            evaluator_result: EvaluatorOutput = context.evaluator(batch)
+            eval_result_list.append(evaluator_result.detach_cpu())
         eval_result = reduce_result(eval_result_list)
 
     # valid評価
@@ -320,8 +319,8 @@ def evaluate(context: TrainingContext) -> EvaluationResults:
         valid_result_list: list[EvaluatorOutput] = []
         for batch in context.valid_loader:
             batch = batch.to_device(context.device, non_blocking=True)
-            result = context.evaluator(batch)
-            valid_result_list.append(detach_cpu(result))
+            evaluator_result: EvaluatorOutput = context.evaluator(batch)
+            valid_result_list.append(evaluator_result.detach_cpu())
         valid_result = reduce_result(valid_result_list)
 
     return EvaluationResults(test=test_result, eval=eval_result, valid=valid_result)

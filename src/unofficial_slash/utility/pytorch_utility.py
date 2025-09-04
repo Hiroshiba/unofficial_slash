@@ -2,6 +2,7 @@
 
 from collections.abc import Callable
 from copy import deepcopy
+from dataclasses import is_dataclass
 from typing import Any
 
 import numpy
@@ -127,6 +128,10 @@ def detach_cpu(data: Any) -> Any:
             return elem_type([detach_cpu(d) for d in data])
         except TypeError:
             return [detach_cpu(d) for d in data]
+    elif is_dataclass(data):
+        raise TypeError(
+            f"detach_cpuメソッドがないdataclassはサポートされていません: {type(data)}"
+        )
     else:
         return data
 
@@ -141,5 +146,7 @@ def to_device(batch: Any, device: str, non_blocking: bool = False) -> Any:
         return type(batch)(to_device(value, device, non_blocking) for value in batch)
     elif isinstance(batch, torch.Tensor):
         return batch.to(device, non_blocking=non_blocking)
+    elif is_dataclass(batch):
+        raise TypeError(f"dataclassはサポートされていません: {type(batch)}")
     else:
         return batch

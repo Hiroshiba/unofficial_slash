@@ -1,6 +1,7 @@
 """評価値計算モジュール"""
 
 from dataclasses import dataclass
+from typing import Self
 
 import torch
 from torch import Tensor, nn
@@ -11,6 +12,7 @@ from unofficial_slash.utility.frame_mask_utils import (
     audio_mask_to_frame_mask,
     validate_frame_alignment,
 )
+from unofficial_slash.utility.pytorch_utility import detach_cpu
 from unofficial_slash.utility.train_utility import DataNumProtocol
 
 
@@ -21,6 +23,13 @@ class EvaluatorOutput(DataNumProtocol):
     rpa_50c: Tensor  # Raw Pitch Accuracy (50cents)
     log_f0_rmse: Tensor  # log-F0 RMSE
     voiced_frames: Tensor  # 有声フレーム数（統計用）
+
+    def detach_cpu(self) -> Self:
+        """全てのTensorをdetachしてCPUに移動"""
+        self.rpa_50c = detach_cpu(self.rpa_50c)
+        self.log_f0_rmse = detach_cpu(self.log_f0_rmse)
+        self.voiced_frames = detach_cpu(self.voiced_frames)
+        return self
 
 
 def calculate_value(output: EvaluatorOutput) -> Tensor:
