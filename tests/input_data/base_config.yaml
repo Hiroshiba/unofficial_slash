@@ -3,13 +3,13 @@ dataset:
     audio_pathlist_path: "tests/data/test_data/train_audio_pathlist.txt"
     pitch_label_pathlist_path: null
     length_file_path: "train_lengths.txt"
-    batch_bins: 8000
+    batch_bins: 1000
     root_dir: "tests/data/test_data"
   valid:
     audio_pathlist_path: "tests/data/test_data/valid_audio_pathlist.txt"
     pitch_label_pathlist_path: "tests/data/test_data/valid_pitch_pathlist.txt"
     length_file_path: "valid_lengths.txt"
-    batch_bins: 4000
+    batch_bins: 1000
     root_dir: "tests/data/test_data"
   test_num: 16 # NOTE: 論文では0
   eval_times_num: 1
@@ -89,7 +89,6 @@ model:
 train:
   batch_size: 5 # NOTE: SLASH論文では17
   eval_batch_size: 5
-  min_batch_size: 1
 
   log_epoch: 1
   eval_epoch: 2

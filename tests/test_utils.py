@@ -101,8 +101,6 @@ def setup_data_and_config(base_config_path: Path, data_dir: UPath) -> Config:
             root_dir=data_dir,
             output_path=train_length_file_path,
             target_batch_size=config.train.batch_size,
-            min_batch_size=config.train.min_batch_size,
-            max_batch_size=config.train.max_batch_size,
             workers=1,
             frame_length=config.network.frame_length,
         )
@@ -117,8 +115,6 @@ def setup_data_and_config(base_config_path: Path, data_dir: UPath) -> Config:
             root_dir=data_dir,
             output_path=valid_length_file_path,
             target_batch_size=config.train.eval_batch_size,
-            min_batch_size=config.train.min_batch_size,
-            max_batch_size=config.train.max_batch_size,
             workers=1,
             frame_length=config.network.frame_length,
         )

@@ -346,7 +346,6 @@ class Model(nn.Module):
         # NOTE: SLASH論文準拠の自己教師あり学習では、学習時にground truth F0ラベルは使用しない
         assert batch.pitch_label is None, "学習時にbatch.pitch_labelはNoneであるべき"
 
-        device = batch.audio.device
         config = self.predictor.network_config
 
         # フレーム単位マスクを事前作成

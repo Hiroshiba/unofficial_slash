@@ -15,16 +15,9 @@ from torch.utils.data import Sampler
 class LengthBatchSampler(Sampler[list[int]]):
     """ESPNet2のLengthBatchSamplerを移植した動的バッチサンプラー"""
 
-    def __init__(
-        self,
-        batch_bins: int,
-        lengths: list[int],
-        min_batch_size: int,
-        drop_last: bool,
-    ):
+    def __init__(self, batch_bins: int, lengths: list[int], drop_last: bool):
         self.batch_bins = batch_bins
         self.lengths = lengths
-        self.min_batch_size = min_batch_size
         self.drop_last = drop_last
 
         self._make_batches()
@@ -41,15 +34,13 @@ class LengthBatchSampler(Sampler[list[int]]):
             current_batch.append(idx)
             bins = length * len(current_batch)
 
-            if bins > self.batch_bins and len(current_batch) >= self.min_batch_size:
+            if bins > self.batch_bins:
                 current_batch.pop()
                 if current_batch:
                     batches.append(current_batch)
                 current_batch = [idx]
 
-        if current_batch and (
-            not self.drop_last or len(current_batch) >= self.min_batch_size
-        ):
+        if current_batch and not self.drop_last:
             batches.append(current_batch)
 
         for batch in batches:

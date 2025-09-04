@@ -87,11 +87,11 @@ def _create_length_file_from_pathlist(
 
 
 def _calculate_batch_bins_for_target_batch_size(
-    lengths: list[int], target_batch_size: int, min_batch_size: int, max_batch_size: int
+    lengths: list[int], target_batch_size: int
 ) -> int:
     """目標平均バッチサイズに対するbatch_bins値を二分探索で計算"""
-    min_bins = max(lengths) * min_batch_size
-    max_bins = max(lengths) * max_batch_size
+    min_bins = max(lengths) * 1
+    max_bins = max(lengths) * target_batch_size * 2
 
     best_bins = max_bins
     best_diff = float("inf")
@@ -100,10 +100,7 @@ def _calculate_batch_bins_for_target_batch_size(
         mid_bins = (min_bins + max_bins) // 2
 
         sampler = LengthBatchSampler(
-            batch_bins=mid_bins,
-            lengths=lengths,
-            min_batch_size=min_batch_size,
-            drop_last=True,
+            batch_bins=mid_bins, lengths=lengths, drop_last=True
         )
 
         if len(sampler.batches) == 0:
@@ -134,8 +131,6 @@ def create_length_file(
     root_dir: UPath,
     output_path: UPath,
     target_batch_size: int,
-    min_batch_size: int,
-    max_batch_size: int,
     workers: int,
     frame_length: int,
 ) -> int:
@@ -149,10 +144,7 @@ def create_length_file(
     )
 
     batch_bins = _calculate_batch_bins_for_target_batch_size(
-        lengths=lengths,
-        target_batch_size=target_batch_size,
-        min_batch_size=min_batch_size,
-        max_batch_size=max_batch_size,
+        lengths=lengths, target_batch_size=target_batch_size
     )
 
     return batch_bins
