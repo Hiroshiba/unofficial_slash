@@ -42,6 +42,11 @@ class DifferentiableWorld(nn.Module):
         )
         self.register_buffer("_hann_window", torch.hann_window(self.n_fft))
 
+        if self.dc_remove:
+            self.avg_pool = torch.nn.AvgPool1d(
+                kernel_size=self.n_fft, stride=1, padding=self.n_fft // 2
+            )
+
     def forward(
         self,
         f0_hz,  # (B, T)
@@ -190,11 +195,8 @@ class DifferentiableWorld(nn.Module):
 
         # DC Remove
         if self.dc_remove:
-            avg_pool = torch.nn.AvgPool1d(
-                kernel_size=self.n_fft, stride=1, padding=self.n_fft // 2
-            )
-            means_p = avg_pool(waveform_syn_p.unsqueeze(0)).squeeze(0)
-            means_a = avg_pool(waveform_syn_a.unsqueeze(0)).squeeze(0)
+            means_p = self.avg_pool(waveform_syn_p.unsqueeze(0)).squeeze(0)
+            means_a = self.avg_pool(waveform_syn_a.unsqueeze(0)).squeeze(0)
             waveform_syn_p = waveform_syn_p - means_p[:, : waveform_syn_p.size(1)]
             waveform_syn_a = waveform_syn_a - means_a[:, : waveform_syn_a.size(1)]
 
