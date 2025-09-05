@@ -8,6 +8,7 @@ import scipy.io.wavfile
 import yaml
 from upath import UPath
 
+from scripts.calculate_batch_bins import calculate_batch_bins
 from scripts.create_length_file import create_length_file
 from unofficial_slash.config import Config
 
@@ -93,31 +94,17 @@ def setup_data_and_config(base_config_path: Path, data_dir: UPath) -> Config:
     _setup_data(generate_audio, "audio", "wav")
 
     # 長さファイル生成（train用）
-    train_pathlist_path = data_dir / "train_audio_pathlist.txt"
     train_length_file_path = data_dir / "train_lengths.txt"
     if not train_length_file_path.exists():
-        batch_bins = create_length_file(
-            pathlist_path=train_pathlist_path,
-            root_dir=data_dir,
-            output_path=train_length_file_path,
-            target_batch_size=config.train.batch_size,
-            workers=1,
-            frame_length=config.network.frame_length,
-        )
+        create_length_file(config, "train")
+        batch_bins = calculate_batch_bins(config, "train")
         config.dataset.train.batch_bins = batch_bins
 
     # 長さファイル生成（valid用）
-    valid_pathlist_path = data_dir / "valid_audio_pathlist.txt"
     valid_length_file_path = data_dir / "valid_lengths.txt"
     if not valid_length_file_path.exists():
-        valid_batch_bins = create_length_file(
-            pathlist_path=valid_pathlist_path,
-            root_dir=data_dir,
-            output_path=valid_length_file_path,
-            target_batch_size=config.train.eval_batch_size,
-            workers=1,
-            frame_length=config.network.frame_length,
-        )
+        create_length_file(config, "valid")
+        valid_batch_bins = calculate_batch_bins(config, "valid")
         config.dataset.valid.batch_bins = valid_batch_bins
 
     # SLASH用ピッチラベル生成

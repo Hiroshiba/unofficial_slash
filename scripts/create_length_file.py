@@ -1,45 +1,77 @@
-"""動的バッチング用音声長ファイル作成スクリプト"""
+"""フレーム長ファイル作成スクリプト"""
 
 import argparse
 from functools import partial
 from multiprocessing import Pool
-from pathlib import Path
 
-import fsspec
 import torchaudio
-from fsspec.implementations.local import LocalFileSystem
+import yaml
 from tqdm import tqdm
 from upath import UPath
 
-from unofficial_slash.sampler import LengthBatchSampler
+from unofficial_slash.config import Config
+from unofficial_slash.dataset import _to_local_path
 
 
-# TODO: dataset.pyにある同一コードと共通化する
-def _to_local_path(p: UPath) -> Path:
-    """リモートならキャッシュを作ってそのパスを、ローカルならそのままそのパスを返す"""
-    if isinstance(p.fs, LocalFileSystem):
-        return Path(p)
-    obj = fsspec.open_local(
-        "simplecache::" + str(p), simplecache={"cache_storage": "./hiho_cache/"}
+def main():
+    """フレーム長ファイル作成"""
+    parser = argparse.ArgumentParser(description="フレーム長ファイル作成スクリプト")
+    parser.add_argument("config_path", type=UPath)
+    parser.add_argument(
+        "--dataset-type",
+        choices=["train", "valid"],
+        required=True,
+        help="測定対象データセット種別",
     )
-    if isinstance(obj, list):
-        raise ValueError(f"複数のローカルパスが返されました: {p} -> {obj}")
-    return Path(obj)
+    args = parser.parse_args()
+
+    config_dict = yaml.safe_load(args.config_path.read_text())
+    config = Config(**config_dict)
+
+    create_length_file(config, args.dataset_type)
 
 
-def _calculate_single_audio_length(audio_path: UPath, frame_length: int) -> int:
-    """単一音声ファイルの長さを計算"""
-    if not audio_path.exists():
-        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+def create_length_file(config: Config, dataset_type: str) -> None:
+    """設定に基づいてフレーム長を測定し保存"""
+    if dataset_type == "train":
+        dataset_config = config.dataset.train
+    elif dataset_type == "valid":
+        if config.dataset.valid is None:
+            raise ValueError("valid dataset config is not found")
+        dataset_config = config.dataset.valid
+    else:
+        raise ValueError(f"Invalid dataset_type: {dataset_type}")
 
-    total_samples = torchaudio.info(_to_local_path(audio_path)).num_frames
-    return total_samples // frame_length
+    network_config = config.network
+
+    if dataset_config.root_dir is None:
+        raise ValueError("root_dir is required")
+
+    print(f"フレーム長測定開始 ({dataset_type}): {dataset_config.audio_pathlist_path}")
+
+    lengths = _calculate_audio_lengths(
+        pathlist_path=UPath(dataset_config.audio_pathlist_path),
+        root_dir=UPath(dataset_config.root_dir),
+        workers=64,
+        frame_length=network_config.frame_length,
+    )
+
+    output_path = UPath(dataset_config.length_file_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with output_path.open("w") as f:
+        for length in lengths:
+            f.write(f"{length}\n")
+
+    print(f"フレーム長ファイル作成完了: {output_path}")
 
 
 def _calculate_audio_lengths(
-    pathlist_path: UPath, root_dir: UPath, workers: int, frame_length: int
+    pathlist_path: UPath,
+    root_dir: UPath,
+    workers: int,
+    frame_length: int,
 ) -> list[int]:
-    """パスリストファイルから各音声ファイルの長さを並列計算"""
+    """パスリストファイルから各音声ファイルのフレーム長を並列計算"""
     if not pathlist_path.exists():
         raise FileNotFoundError(f"Pathlist file not found: {pathlist_path}")
 
@@ -49,120 +81,24 @@ def _calculate_audio_lengths(
 
     process = partial(_calculate_single_audio_length, frame_length=frame_length)
     with Pool(processes=workers) as pool:
-        lengths = list(
+        results = list(
             tqdm(
                 pool.imap(process, audio_paths),
                 total=len(audio_paths),
-                desc="音声ファイル長さ計算中",
+                desc="フレーム長計算中",
             )
         )
 
-    return lengths
+    return results
 
 
-def _create_length_file_from_pathlist(
-    pathlist_path: UPath,
-    root_dir: UPath,
-    output_path: UPath,
-    workers: int,
-    frame_length: int,
-) -> list[int]:
-    """パスリストファイルから音声長ファイルを作成し、長さリストを返す"""
-    lengths = _calculate_audio_lengths(
-        pathlist_path=pathlist_path,
-        root_dir=root_dir,
-        workers=workers,
-        frame_length=frame_length,
-    )
+def _calculate_single_audio_length(audio_path: UPath, frame_length: int) -> int:
+    """単一音声ファイルのフレーム長を計算"""
+    if not audio_path.exists():
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
 
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w") as f:
-        for length in lengths:
-            f.write(f"{length}\n")
-
-    print(f"音声長ファイル作成完了: {output_path}")
-    print(f"総ファイル数: {len(lengths)}")
-
-    return lengths
-
-
-def _calculate_batch_bins_for_target_batch_size(
-    lengths: list[int], target_batch_size: int
-) -> int:
-    """目標平均バッチサイズに対するbatch_bins値を二分探索で計算"""
-    min_bins = max(lengths) * 1
-    max_bins = max(lengths) * target_batch_size * 2
-
-    best_bins = max_bins
-    best_diff = float("inf")
-
-    for _ in range(50):
-        mid_bins = (min_bins + max_bins) // 2
-
-        sampler = LengthBatchSampler(
-            batch_bins=mid_bins, lengths=lengths, drop_last=True
-        )
-
-        if len(sampler.batches) == 0:
-            min_bins = mid_bins + 1
-            continue
-
-        total_samples = sum(len(batch) for batch in sampler.batches)
-        actual_batch_size = total_samples / len(sampler.batches)
-        diff = abs(actual_batch_size - target_batch_size)
-
-        if diff < best_diff:
-            best_diff = diff
-            best_bins = mid_bins
-
-        if actual_batch_size < target_batch_size:
-            min_bins = mid_bins + 1
-        else:
-            max_bins = mid_bins - 1
-
-        if min_bins > max_bins:
-            break
-
-    return best_bins
-
-
-def create_length_file(
-    pathlist_path: UPath,
-    root_dir: UPath,
-    output_path: UPath,
-    target_batch_size: int,
-    workers: int,
-    frame_length: int,
-) -> int:
-    """音声長ファイル作成と平均バッチサイズに対するbatch_bins値の計算"""
-    lengths = _create_length_file_from_pathlist(
-        pathlist_path=pathlist_path,
-        root_dir=root_dir,
-        output_path=output_path,
-        workers=workers,
-        frame_length=frame_length,
-    )
-
-    batch_bins = _calculate_batch_bins_for_target_batch_size(
-        lengths=lengths, target_batch_size=target_batch_size
-    )
-
-    return batch_bins
-
-
-def main():
-    """音声長ファイル作成と平均バッチサイズに対するbatch_bins値の計算"""
-    parser = argparse.ArgumentParser(description="音声長ファイル作成スクリプト")
-    parser.add_argument("pathlist_path", type=UPath)
-    parser.add_argument("--root-dir", type=UPath, default=UPath("train_dataset"))
-    parser.add_argument("--output-path", type=UPath, required=True)
-    parser.add_argument("--target-batch-size", type=int, default=17)
-    parser.add_argument("--min-batch-size", type=int, default=1)
-    parser.add_argument("--max-batch-size", type=int, default=32)
-    parser.add_argument("--workers", type=int, default=64)
-    parser.add_argument("--frame-length", type=int, default=120)
-    batch_bins = create_length_file(**vars(parser.parse_args()))
-    print(f"推奨batch_bins値: {batch_bins}")
+    total_samples = torchaudio.info(_to_local_path(audio_path)).num_frames
+    return total_samples // frame_length
 
 
 if __name__ == "__main__":
