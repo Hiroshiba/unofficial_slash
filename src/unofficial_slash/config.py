@@ -43,6 +43,7 @@ class NetworkConfig(_Model):
     # 基本設定
     sample_rate: int
     frame_length: int
+    valid_pitch_frame_length: int
 
     # Pitch Encoder 設定
     f0_bins: int

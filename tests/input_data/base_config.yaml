@@ -22,6 +22,7 @@ dataset:
 network:
   sample_rate: 24000
   frame_length: 120
+  valid_pitch_frame_length: 120 # NOTE: 論文では480
 
   # Pitch Encoder
   f0_bins: 64 # NOTE: テスト用に縮小、論文では1024

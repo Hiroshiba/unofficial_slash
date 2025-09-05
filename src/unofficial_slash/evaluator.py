@@ -128,9 +128,10 @@ class Evaluator(nn.Module):
         if batch.pitch_label is None:
             raise ValueError("Evaluator requires pitch_label for evaluation")
 
-        # NOTE: MIR-1kのピッチラベルは50Hzなので補間する
-        scale = int(config.sample_rate / config.frame_length // 50)
-        target_f0 = torch.repeat_interleave(batch.pitch_label, scale, dim=-1)  # (B, T)
+        pitch_label_scale = int(config.valid_pitch_frame_length / config.frame_length)
+        target_f0 = torch.repeat_interleave(
+            batch.pitch_label, pitch_label_scale, dim=-1
+        )  # (B, T)
 
         frame_mask = audio_mask_to_frame_mask(
             batch.attention_mask,
@@ -142,7 +143,7 @@ class Evaluator(nn.Module):
             target_f0.shape[1],
             frame_mask.shape[1],
             name="log_f0_rmse",
-            max_allowed=scale,  # ピッチ補間分のずれを許容
+            max_allowed=pitch_label_scale,  # ピッチ補間分のずれを許容
         )
 
         predicted_f0_aligned = predicted_f0[:, :min_frames]
