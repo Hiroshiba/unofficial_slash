@@ -55,6 +55,7 @@ class LazyInputData:
         pitch_data = None
         if self.pitch_label_path is not None:
             pitch_data = numpy.loadtxt(_to_local_path(self.pitch_label_path))
+            pitch_data = numpy.squeeze(pitch_data)
 
         return InputData(
             audio=audio.squeeze(0).numpy(),  # (T,) 音声波形

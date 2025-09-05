@@ -46,23 +46,8 @@ def raw_pitch_accuracy(
     f0_max: float,
 ) -> tuple[Tensor, Tensor]:
     """Raw Pitch Accuracy (RPA) - SLASH論文評価指標"""
-    min_frames = validate_frame_alignment(
-        predicted_f0.shape[1],
-        target_f0.shape[1],
-        frame_mask.shape[1],
-        name="raw_pitch_accuracy",
-        max_allowed=2,
-    )
-
-    predicted_f0_aligned = predicted_f0[:, :min_frames]
-    target_f0_aligned = target_f0[:, :min_frames]
-    frame_mask_aligned = frame_mask[:, :min_frames]
-
     voiced_mask = (
-        (target_f0_aligned > 0)
-        & (target_f0_aligned >= f0_min)
-        & (target_f0_aligned <= f0_max)
-        & frame_mask_aligned
+        (target_f0 > 0) & (target_f0 >= f0_min) & (target_f0 <= f0_max) & frame_mask
     )
 
     if voiced_mask.sum() == 0:
@@ -71,8 +56,8 @@ def raw_pitch_accuracy(
         return torch.tensor(0.0, device=device), torch.tensor(0, device=device)
 
     # 有声フレームのみを抽出
-    pred_voiced = predicted_f0_aligned[voiced_mask]
-    target_voiced = target_f0_aligned[voiced_mask]
+    pred_voiced = predicted_f0[voiced_mask]
+    target_voiced = target_f0[voiced_mask]
 
     # cent差分計算: 1200 * log2(pred/target)
     # 数値安定性のためクランプ
@@ -99,23 +84,8 @@ def log_f0_rmse(
     f0_max: float,
 ) -> Tensor:
     """log-F0 RMSE - SLASH論文評価指標"""
-    min_frames = validate_frame_alignment(
-        predicted_f0.shape[1],
-        target_f0.shape[1],
-        frame_mask.shape[1],
-        name="log_f0_rmse",
-        max_allowed=2,
-    )
-
-    predicted_f0_aligned = predicted_f0[:, :min_frames]
-    target_f0_aligned = target_f0[:, :min_frames]
-    frame_mask_aligned = frame_mask[:, :min_frames]
-
     voiced_mask = (
-        (target_f0_aligned > 0)
-        & (target_f0_aligned >= f0_min)
-        & (target_f0_aligned <= f0_max)
-        & frame_mask_aligned
+        (target_f0 > 0) & (target_f0 >= f0_min) & (target_f0 <= f0_max) & frame_mask
     )
 
     if voiced_mask.sum() == 0:
@@ -123,8 +93,8 @@ def log_f0_rmse(
         return torch.tensor(0.0, device=predicted_f0.device)
 
     # 有声フレームのみを抽出
-    pred_voiced = predicted_f0_aligned[voiced_mask]
-    target_voiced = target_f0_aligned[voiced_mask]
+    pred_voiced = predicted_f0[voiced_mask]
+    target_voiced = target_f0[voiced_mask]
 
     # 数値安定性のためクランプ
     pred_voiced = torch.clamp(pred_voiced, min=f0_min, max=f0_max)
@@ -149,7 +119,8 @@ class Evaluator(nn.Module):
     @torch.no_grad()
     def forward(self, batch: BatchOutput) -> EvaluatorOutput:
         """データをネットワークに入力して評価値を計算する"""
-        batch = pad_for_cqt(batch, self.generator.predictor.network_config)
+        config = self.generator.predictor.network_config
+        batch = pad_for_cqt(batch, config)
 
         generator_output = self.generator(batch.audio)
         predicted_f0 = generator_output.f0_values  # (B, T)
@@ -157,29 +128,42 @@ class Evaluator(nn.Module):
         if batch.pitch_label is None:
             raise ValueError("Evaluator requires pitch_label for evaluation")
 
-        target_f0 = batch.pitch_label  # (B, T)
+        # NOTE: MIR-1kのピッチラベルは50Hzなので補間する
+        scale = int(config.sample_rate / config.frame_length // 50)
+        target_f0 = torch.repeat_interleave(batch.pitch_label, scale, dim=-1)  # (B, T)
 
-        config = self.generator.predictor.network_config
         frame_mask = audio_mask_to_frame_mask(
             batch.attention_mask,
             hop_length=config.frame_length,
         )
 
+        min_frames = validate_frame_alignment(
+            predicted_f0.shape[1],
+            target_f0.shape[1],
+            frame_mask.shape[1],
+            name="log_f0_rmse",
+            max_allowed=scale,  # ピッチ補間分のずれを許容
+        )
+
+        predicted_f0_aligned = predicted_f0[:, :min_frames]
+        target_f0_aligned = target_f0[:, :min_frames]
+        frame_mask_aligned = frame_mask[:, :min_frames]
+
         rpa_50c, voiced_frames = raw_pitch_accuracy(
-            predicted_f0=predicted_f0,
-            target_f0=target_f0,
-            frame_mask=frame_mask,
+            predicted_f0=predicted_f0_aligned,
+            target_f0=target_f0_aligned,
+            frame_mask=frame_mask_aligned,
             cents_threshold=50.0,
-            f0_min=20.0,
-            f0_max=2000.0,
+            f0_min=config.pitch_guide_f_min,
+            f0_max=config.pitch_guide_f_max,
         )
 
         rmse = log_f0_rmse(
-            predicted_f0=predicted_f0,
-            target_f0=target_f0,
-            frame_mask=frame_mask,
-            f0_min=20.0,
-            f0_max=2000.0,
+            predicted_f0=predicted_f0_aligned,
+            target_f0=target_f0_aligned,
+            frame_mask=frame_mask_aligned,
+            f0_min=config.pitch_guide_f_min,
+            f0_max=config.pitch_guide_f_max,
         )
 
         return EvaluatorOutput(
