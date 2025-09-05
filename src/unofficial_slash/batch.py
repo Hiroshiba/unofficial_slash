@@ -7,7 +7,9 @@ import torch
 from torch import Tensor
 from torch.nn.utils.rnn import pad_sequence
 
+from unofficial_slash.config import NetworkConfig
 from unofficial_slash.data.data import OutputData
+from unofficial_slash.utility.cqt_utility import calculate_minimum_audio_frames
 from unofficial_slash.utility.pytorch_utility import to_device
 
 
@@ -94,4 +96,45 @@ def collate_dataset_output(data_list: list[OutputData]) -> BatchOutput:
         pitch_shift_semitones=shift_tensor,
         attention_mask=attention_mask,
         lengths=lengths,
+    )
+
+
+def pad_for_cqt(batch: BatchOutput, network_config: NetworkConfig) -> BatchOutput:
+    """CQT最小必要長を満たすようにBatchOutputをpadding"""
+    minimum_frames = calculate_minimum_audio_frames(
+        cqt_fmin=network_config.cqt_fmin,
+        cqt_bins_per_octave=network_config.cqt_bins_per_octave,
+        cqt_filter_scale=network_config.cqt_filter_scale,
+        frame_length=network_config.frame_length,
+        sample_rate=network_config.sample_rate,
+    )
+
+    minimum_samples = minimum_frames * network_config.frame_length
+    current_samples = batch.audio.shape[1]
+
+    if current_samples >= minimum_samples:
+        return batch
+
+    pad_samples = minimum_samples - current_samples
+
+    audio_padded = torch.nn.functional.pad(
+        batch.audio, (0, pad_samples), mode="constant", value=0.0
+    )
+
+    pitch_label_padded = None
+    if batch.pitch_label is not None:
+        pitch_label_padded = torch.nn.functional.pad(
+            batch.pitch_label, (0, pad_samples), mode="constant", value=0.0
+        )
+
+    attention_mask_padded = torch.nn.functional.pad(
+        batch.attention_mask, (0, pad_samples), mode="constant", value=False
+    )
+
+    return BatchOutput(
+        audio=audio_padded,
+        pitch_label=pitch_label_padded,
+        pitch_shift_semitones=batch.pitch_shift_semitones,
+        attention_mask=attention_mask_padded,
+        lengths=batch.lengths,  # NOTE: 実際の長さは変更しない
     )

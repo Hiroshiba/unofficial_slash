@@ -6,7 +6,7 @@ from typing import Self
 import torch
 from torch import Tensor, nn
 
-from unofficial_slash.batch import BatchOutput
+from unofficial_slash.batch import BatchOutput, pad_for_cqt
 from unofficial_slash.generator import Generator
 from unofficial_slash.utility.frame_mask_utils import (
     audio_mask_to_frame_mask,
@@ -149,6 +149,8 @@ class Evaluator(nn.Module):
     @torch.no_grad()
     def forward(self, batch: BatchOutput) -> EvaluatorOutput:
         """データをネットワークに入力して評価値を計算する"""
+        batch = pad_for_cqt(batch, self.generator.predictor.network_config)
+
         generator_output = self.generator(batch.audio)
         predicted_f0 = generator_output.f0_values  # (B, T)
 

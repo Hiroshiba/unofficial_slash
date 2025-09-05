@@ -6,17 +6,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 このリポジトリは「SLASH: Self-Supervised Speech Pitch Estimation Leveraging DSP-derived Absolute Pitch」論文をなるべく忠実に実装することが目的です。SLASH は自己教師あり学習（SSL）と従来のデジタル信号処理（DSP）を組み合わせて、音声の基本周波数（F0）推定を行う手法です。
 
-## アーキテクチャ構成
-
-### コアファイル構造
-
-- `train.py`: メインの学習ループ、損失計算、勾配更新
-- `network/`: ニューラルネットワーク構造・ニューラル信号処理
-- `dataset.py`: データローダー（LibriTTS-R, MIR-1K 対応）
-
 ## TODO
 
 - 右チャンネルの音声を使うように
+- ピッチのフレーム数がおかしいかも、pad のとこと dataset のとこと比較のとこと
 
 ## 損失関数設計
 

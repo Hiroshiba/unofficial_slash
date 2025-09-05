@@ -8,7 +8,7 @@ from torch import Tensor, nn
 from torch.nn import functional as F
 from torch.nn.functional import huber_loss
 
-from unofficial_slash.batch import BatchOutput
+from unofficial_slash.batch import BatchOutput, pad_for_cqt
 from unofficial_slash.config import ModelConfig
 from unofficial_slash.network.dsp.fine_structure import (
     fine_structure_spectrum,
@@ -343,10 +343,11 @@ class Model(nn.Module):
 
     def forward(self, batch: BatchOutput) -> ModelOutput:
         """データをネットワークに入力して損失などを計算する"""
-        # NOTE: SLASH論文準拠の自己教師あり学習では、学習時にground truth F0ラベルは使用しない
+        # NOTE: 自己教師あり学習では学習時にground truth F0ラベルは使用しない
         assert batch.pitch_label is None, "学習時にbatch.pitch_labelはNoneであるべき"
 
         config = self.predictor.network_config
+        batch = pad_for_cqt(batch, config)
 
         # フレーム単位マスクを事前作成
         frame_mask = audio_mask_to_frame_mask(
