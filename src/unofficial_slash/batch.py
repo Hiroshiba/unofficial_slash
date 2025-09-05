@@ -123,8 +123,9 @@ def pad_for_cqt(batch: BatchOutput, network_config: NetworkConfig) -> BatchOutpu
 
     pitch_label_padded = None
     if batch.pitch_label is not None:
+        pad_frames = pad_samples // network_config.frame_length
         pitch_label_padded = torch.nn.functional.pad(
-            batch.pitch_label, (0, pad_samples), mode="constant", value=0.0
+            batch.pitch_label, (0, pad_frames), mode="constant", value=0.0
         )
 
     attention_mask_padded = torch.nn.functional.pad(

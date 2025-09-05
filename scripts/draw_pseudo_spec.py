@@ -241,7 +241,7 @@ def create_masks(
             len(frame_mask_np),
             len(voiced_flag),
             name="create_masks_frame_alignment",
-            max_diff=2,
+            max_allowed=2,
         )
         vuv_mask = voiced_flag[:min_frames].astype(bool)
     else:
@@ -249,7 +249,7 @@ def create_masks(
             len(f0_values),
             len(frame_mask_np),
             name="create_masks_frame_alignment_no_vuv",
-            max_diff=2,
+            max_allowed=2,
         )
         vuv_mask = np.ones(min_frames, dtype=bool)
 

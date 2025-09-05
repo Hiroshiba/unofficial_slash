@@ -51,7 +51,7 @@ def raw_pitch_accuracy(
         target_f0.shape[1],
         frame_mask.shape[1],
         name="raw_pitch_accuracy",
-        max_diff=2,
+        max_allowed=2,
     )
 
     predicted_f0_aligned = predicted_f0[:, :min_frames]
@@ -104,7 +104,7 @@ def log_f0_rmse(
         target_f0.shape[1],
         frame_mask.shape[1],
         name="log_f0_rmse",
-        max_diff=2,
+        max_allowed=2,
     )
 
     predicted_f0_aligned = predicted_f0[:, :min_frames]

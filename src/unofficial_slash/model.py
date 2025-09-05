@@ -70,7 +70,7 @@ def pitch_consistency_loss(
         f0_original.shape[1],
         frame_mask.shape[1],
         name="pitch_consistency_loss",
-        max_diff=2,
+        max_allowed=2,
     )
 
     f0_original_aligned = f0_original[:, :min_frames]
@@ -109,7 +109,7 @@ def pitch_guide_loss(
         f0_logits.shape[1],
         frame_mask.shape[1],
         name="pitch_guide_loss",
-        max_diff=2,
+        max_allowed=2,
     )
 
     f0_logits_aligned = f0_logits[:, :min_frames, :]
@@ -141,7 +141,7 @@ def pitch_guide_shift_loss(
         f0_logits_shifted.shape[1],
         frame_mask.shape[1],
         name="pitch_guide_shift_loss",
-        max_diff=2,
+        max_allowed=2,
     )
 
     f0_logits_shifted_aligned = f0_logits_shifted[:, :min_frames, :]
@@ -178,7 +178,7 @@ def pseudo_spectrogram_loss(
         vuv_mask.shape[1],
         frame_mask.shape[1],
         name="pseudo_spectrogram_loss",
-        max_diff=2,
+        max_allowed=2,
     )
 
     pseudo_aligned = pseudo_spectrogram[:, :min_frames, :]
@@ -221,7 +221,7 @@ def reconstruction_loss(
         target_spectrogram.shape[1],
         frame_mask.shape[1],
         name="reconstruction_loss_GED",
-        max_diff=2,
+        max_allowed=2,
     )
     generated_spec_1 = generated_spec_1[:, :min_frames, :]
     generated_spec_2 = generated_spec_2[:, :min_frames, :]
@@ -416,7 +416,7 @@ class Model(nn.Module):
             f0_values.shape[1],
             target_spectrogram.shape[1],
             name="CQT_STFT_alignment",
-            max_diff=2,
+            max_allowed=2,
         )
 
         # スペクトル包絡推定（Pseudo Spectrogram生成前に計算）
@@ -460,7 +460,7 @@ class Model(nn.Module):
             f0_values.shape[1],
             aperiodicity.shape[1],
             name="f0_aperiodicity_alignment",
-            max_diff=2,
+            max_allowed=2,
         )
 
         loss_pseudo = pseudo_spectrogram_loss(
@@ -508,7 +508,7 @@ class Model(nn.Module):
         f0_logits_aug, f0_values_aug, bap_aug = self.predictor(audio_aug_volume)
 
         min_frames_aug = validate_frame_alignment(
-            f0_values.shape[1], frame_mask.shape[1], name="L_aug_loss", max_diff=2
+            f0_values.shape[1], frame_mask.shape[1], name="L_aug_loss", max_allowed=2
         )
 
         f0_values_aligned = f0_values[:, :min_frames_aug]
@@ -549,7 +549,7 @@ class Model(nn.Module):
             bap_upsampled_original.shape[1],
             frame_mask.shape[1],
             name="L_ap_loss",
-            max_diff=2,
+            max_allowed=2,
         )
 
         bap_original_aligned = bap_upsampled_original[:, :min_frames_ap, :]

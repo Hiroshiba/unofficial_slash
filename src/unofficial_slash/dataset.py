@@ -47,9 +47,9 @@ class LazyInputData:
                 audio, orig_freq=sr, new_freq=sample_rate
             )
 
-        # モノラル変換（ステレオの場合は左チャンネルのみ使用）
+        # モノラル変換（ステレオの場合は右チャンネルのみ使用）
         if audio.shape[0] > 1:
-            audio = audio[0:1, :]  # 最初のチャンネルのみ
+            audio = audio[1:2, :]  # 右チャンネル（MIR1kボーカル）のみ
 
         # ピッチラベル読み込み（オプション）
         pitch_data = None
